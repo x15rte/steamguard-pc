@@ -1,3 +1,5 @@
+import base64
+import json
 from urllib.parse import parse_qs
 
 import pytest
@@ -7,6 +9,10 @@ from steamguard_pc._protobuf import Field, decode_message, encode_message, encod
 
 
 STEAMID64 = "76561197960287930"
+
+def jwt_token(payload: dict) -> str:
+    encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
+    return f"header.{encoded}.signature"
 
 
 def test_protobuf_helpers_round_trip_nested_fields():
@@ -103,6 +109,142 @@ def test_login_with_credentials_finalizes_web_login_cookies(monkeypatch):
         "PollAuthSessionStatus",
     ]
 
+def test_login_with_credentials_rejects_unsupported_guard_without_polling(monkeypatch):
+    client = auth.SteamAuthClient()
+    calls = []
+
+    monkeypatch.setattr(auth, "encrypt_password", lambda public_mod, public_exp, password: "encrypted-password")
+
+    def fake_api(api_method, request_data, response_descriptor, method="POST", access_token=None):
+        calls.append(api_method)
+        if api_method == "GetPasswordRSAPublicKey":
+            return {"publickey_mod": "ff", "publickey_exp": "010001", "timestamp": 123}
+        if api_method == "BeginAuthSessionViaCredentials":
+            return {
+                "client_id": 55,
+                "request_id": b"request",
+                "interval": 0.01,
+                "allowed_confirmations": [{"type": auth.GUARD_MACHINE_TOKEN, "message": "machine"}],
+                "steamid": int(STEAMID64),
+            }
+        if api_method == "PollAuthSessionStatus":
+            raise AssertionError("unexpected polling")
+        raise AssertionError(api_method)
+
+    monkeypatch.setattr(client, "_api_request", fake_api)
+
+    with pytest.raises(auth.SteamAuthUnsupportedChallengeError) as excinfo:
+        client.login_with_credentials(
+            "fixture",
+            "password",
+            code_provider=lambda action, auth_session: None,
+            confirmation_provider=lambda actions: None,
+            sleep=lambda seconds: None,
+        )
+
+    assert str(excinfo.value) == "Steam login requires unsupported guard action(s): machine token"
+    assert "PollAuthSessionStatus" not in calls
+
+
+def test_login_with_credentials_uses_supported_guard_when_unsupported_also_offered(monkeypatch):
+    client = auth.SteamAuthClient()
+    calls = []
+
+    monkeypatch.setattr(auth, "encrypt_password", lambda public_mod, public_exp, password: "encrypted-password")
+
+    def fake_api(api_method, request_data, response_descriptor, method="POST", access_token=None):
+        calls.append(api_method)
+        if api_method == "GetPasswordRSAPublicKey":
+            return {"publickey_mod": "ff", "publickey_exp": "010001", "timestamp": 123}
+        if api_method == "BeginAuthSessionViaCredentials":
+            return {
+                "client_id": 55,
+                "request_id": b"request",
+                "interval": 0.01,
+                "allowed_confirmations": [
+                    {"type": auth.GUARD_MACHINE_TOKEN, "message": "machine"},
+                    {"type": auth.GUARD_DEVICE_CODE, "message": "mobile"},
+                ],
+                "steamid": int(STEAMID64),
+            }
+        if api_method == "UpdateAuthSessionWithSteamGuardCode":
+            return {}
+        if api_method == "PollAuthSessionStatus":
+            return {"refresh_token": "refresh-token", "access_token": "access-token"}
+        raise AssertionError(api_method)
+
+    def fake_finalize(refresh_token, steamid64, sessionid=None):
+        return auth.WebLoginResult(steamid64, "community-secure", "community-session")
+
+    monkeypatch.setattr(client, "_api_request", fake_api)
+    monkeypatch.setattr(client, "finalize_web_login", fake_finalize)
+
+    result = client.login_with_credentials(
+        "fixture",
+        "password",
+        code_provider=lambda action, auth_session: "ABCDE",
+        confirmation_provider=lambda actions: None,
+        sleep=lambda seconds: None,
+    )
+
+    assert result.access_token == "access-token"
+    assert "UpdateAuthSessionWithSteamGuardCode" in calls
+    assert "PollAuthSessionStatus" in calls
+
+
+def test_login_with_credentials_rejects_agreement_url_from_poll(monkeypatch):
+    client = auth.SteamAuthClient()
+
+    monkeypatch.setattr(auth, "encrypt_password", lambda public_mod, public_exp, password: "encrypted-password")
+
+    def fake_api(api_method, request_data, response_descriptor, method="POST", access_token=None):
+        if api_method == "GetPasswordRSAPublicKey":
+            return {"publickey_mod": "ff", "publickey_exp": "010001", "timestamp": 123}
+        if api_method == "BeginAuthSessionViaCredentials":
+            return {
+                "client_id": 55,
+                "request_id": b"request",
+                "interval": 0.01,
+                "allowed_confirmations": [],
+                "steamid": int(STEAMID64),
+            }
+        if api_method == "PollAuthSessionStatus":
+            return {"agreement_session_url": "https://steamcommunity.com/agreements"}
+        raise AssertionError(api_method)
+
+    monkeypatch.setattr(client, "_api_request", fake_api)
+
+    with pytest.raises(auth.SteamAuthUnsupportedChallengeError) as excinfo:
+        client.login_with_credentials(
+            "fixture",
+            "password",
+            code_provider=lambda action, auth_session: None,
+            confirmation_provider=lambda actions: None,
+            sleep=lambda seconds: None,
+        )
+
+    assert str(excinfo.value) == "Steam login requires completing an additional Steam agreement or risk challenge"
+
+
+def test_start_session_with_credentials_rejects_missing_session_identifiers(monkeypatch):
+    client = auth.SteamAuthClient()
+
+    monkeypatch.setattr(auth, "encrypt_password", lambda public_mod, public_exp, password: "encrypted-password")
+
+    def fake_api(api_method, request_data, response_descriptor, method="POST", access_token=None):
+        if api_method == "GetPasswordRSAPublicKey":
+            return {"publickey_mod": "ff", "publickey_exp": "010001", "timestamp": 123}
+        if api_method == "BeginAuthSessionViaCredentials":
+            return {"extended_error_message": "captcha required"}
+        raise AssertionError(api_method)
+
+    monkeypatch.setattr(client, "_api_request", fake_api)
+
+    with pytest.raises(auth.SteamAuthResponseError) as excinfo:
+        client.start_session_with_credentials("fixture", "password")
+
+    assert str(excinfo.value) == "captcha required"
+
 
 def test_finalize_web_login_posts_nonce_follows_transfers_and_reads_community_cookies(requests_mock):
     client = auth.SteamAuthClient()
@@ -159,3 +301,15 @@ def test_refresh_access_token_uses_refresh_token_subject(monkeypatch):
 
     assert client.refresh_access_token(token) == ("access-token", None)
     assert captured["method"] == "GenerateAccessTokenForApp"
+
+
+def test_jwt_expiration_reads_exp_claim():
+    token = jwt_token({"sub": STEAMID64, "exp": 1700000050})
+
+    assert auth.jwt_expiration(token) == 1700000050
+
+
+def test_jwt_expiration_returns_none_when_missing():
+    token = jwt_token({"sub": STEAMID64})
+
+    assert auth.jwt_expiration(token) is None

@@ -1,9 +1,12 @@
+import time
+
 import requests
 
 from . import auth, storage
 
 
 COOKIE_DOMAIN = "steamcommunity.com"
+TOKEN_REFRESH_SKEW_SECONDS = 10 * 60
 
 
 class SessionExpiredError(RuntimeError):
@@ -20,9 +23,19 @@ def save_community_cookies(steamid64: str, steam_login_secure: str, sessionid: s
     storage.put_secret(steamid64, "sessionid", sessionid)
 
 
+def _jwt_expires_within(token: str | None, now: int, skew_seconds: int = TOKEN_REFRESH_SKEW_SECONDS) -> bool:
+    if not token:
+        return False
+    try:
+        expiration = auth.jwt_expiration(token)
+    except ValueError:
+        return False
+    return expiration is not None and expiration <= now + skew_seconds
+
 def refresh_auth_tokens(
     steamid64: str,
     auth_client: auth.SteamAuthClient | None = None,
+    renew_refresh_token: bool = False,
 ) -> tuple[str, str]:
     refresh_token = storage.get_secret(steamid64, "refresh_token")
     if not refresh_token:
@@ -30,7 +43,10 @@ def refresh_auth_tokens(
 
     client = auth_client or auth.SteamAuthClient()
     try:
-        access_token, renewed_refresh_token = client.refresh_access_token(refresh_token)
+        if renew_refresh_token:
+            access_token, renewed_refresh_token = client.refresh_access_token(refresh_token, renew_refresh_token=True)
+        else:
+            access_token, renewed_refresh_token = client.refresh_access_token(refresh_token)
     except auth.SteamAuthError as exc:
         raise SessionExpiredError("Steam token refresh failed; run `steamguard-pc login`") from exc
 
@@ -44,9 +60,14 @@ def refresh_auth_tokens(
 def refresh_community_session(
     steamid64: str,
     auth_client: auth.SteamAuthClient | None = None,
+    renew_refresh_token: bool = False,
 ) -> requests.Session:
     client = auth_client or auth.SteamAuthClient()
-    access_token, effective_refresh_token = refresh_auth_tokens(steamid64, auth_client=client)
+    access_token, effective_refresh_token = refresh_auth_tokens(
+        steamid64,
+        auth_client=client,
+        renew_refresh_token=renew_refresh_token,
+    )
     try:
         web_login = client.finalize_web_login(effective_refresh_token, steamid64)
     except auth.SteamAuthError as exc:
@@ -56,7 +77,11 @@ def refresh_community_session(
     return get_community_session(steamid64, refresh_if_missing=False)
 
 
-def get_community_session(steamid64: str, refresh_if_missing: bool = True) -> requests.Session:
+def get_community_session(
+    steamid64: str,
+    refresh_if_missing: bool = True,
+    now: int | None = None,
+) -> requests.Session:
     steam_login_secure = storage.get_secret(steamid64, "steamLoginSecure")
     sessionid = storage.get_secret(steamid64, "sessionid")
     if not steam_login_secure or not sessionid:
@@ -72,6 +97,15 @@ def get_community_session(steamid64: str, refresh_if_missing: bool = True) -> re
         raise SessionExpiredError(
             f"missing Steam Community cookies for {steamid64}; run `steamguard-pc login` or `steamguard-pc set-cookies {steamid64}`"
         )
+
+    if refresh_if_missing:
+        access_token = storage.get_secret(steamid64, "access_token")
+        refresh_token = storage.get_secret(steamid64, "refresh_token")
+        if refresh_token:
+            current_time = int(now if now is not None else time.time())
+            renew_refresh = _jwt_expires_within(refresh_token, current_time)
+            if _jwt_expires_within(access_token, current_time) or renew_refresh:
+                return refresh_community_session(steamid64, renew_refresh_token=renew_refresh)
 
     session = requests.Session()
     session.headers.update({"User-Agent": "SteamGuardPC/0.1 requests"})

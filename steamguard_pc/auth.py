@@ -22,6 +22,11 @@ GUARD_EMAIL_CODE = 2
 GUARD_DEVICE_CODE = 3
 GUARD_DEVICE_CONFIRMATION = 4
 GUARD_EMAIL_CONFIRMATION = 5
+GUARD_MACHINE_TOKEN = 6
+GUARD_LEGACY_MACHINE_AUTH = 7
+SUPPORTED_CODE_GUARDS = {GUARD_EMAIL_CODE, GUARD_DEVICE_CODE}
+SUPPORTED_CONFIRMATION_GUARDS = {GUARD_DEVICE_CONFIRMATION, GUARD_EMAIL_CONFIRMATION}
+PASSIVE_GUARDS = {GUARD_NONE}
 REQUEST_TIMEOUT = 30
 LOGIN_FINALIZE_URL = "https://login.steampowered.com/jwt/finalizelogin"
 COMMUNITY_HOME_REDIRECT = "https://steamcommunity.com/login/home/?goto="
@@ -36,6 +41,8 @@ GUARD_TYPE_NAMES = {
     GUARD_DEVICE_CODE: "mobile authenticator code",
     GUARD_DEVICE_CONFIRMATION: "mobile app confirmation",
     GUARD_EMAIL_CONFIRMATION: "email confirmation",
+    GUARD_MACHINE_TOKEN: "machine token",
+    GUARD_LEGACY_MACHINE_AUTH: "legacy machine auth",
 }
 
 _ALLOWED_CONFIRMATION = {
@@ -87,6 +94,9 @@ class SteamAuthResponseError(SteamAuthError):
 class SteamAuthTimeoutError(SteamAuthError):
     pass
 
+class SteamAuthUnsupportedChallengeError(SteamAuthError):
+    pass
+
 
 @dataclass(frozen=True)
 class GuardAction:
@@ -96,6 +106,10 @@ class GuardAction:
     @property
     def label(self) -> str:
         return GUARD_TYPE_NAMES.get(self.type, f"unknown guard type {self.type}")
+
+def _unsupported_guard_actions(actions: list[GuardAction]) -> list[GuardAction]:
+    supported_guards = SUPPORTED_CODE_GUARDS | SUPPORTED_CONFIRMATION_GUARDS | PASSIVE_GUARDS
+    return [action for action in actions if action.type not in supported_guards]
 
 
 @dataclass
@@ -146,6 +160,13 @@ def jwt_subject(token: str) -> str:
     if not subject:
         raise ValueError("JWT missing subject")
     return str(subject)
+
+def jwt_expiration(token: str) -> int | None:
+    expiration = decode_jwt_payload(token).get("exp")
+    try:
+        return int(expiration)
+    except (TypeError, ValueError):
+        return None
 
 
 
@@ -290,6 +311,10 @@ class SteamAuthClient:
             fields.append((10, "length", steam_guard_machine_token))
 
         payload = self._api_request("BeginAuthSessionViaCredentials", encode_message(fields), _BEGIN_RESPONSE)
+        if not payload.get("client_id") or not payload.get("request_id"):
+            raise SteamAuthResponseError(
+                str(payload.get("extended_error_message") or "Steam authentication response is missing session identifiers")
+            )
         return AuthSession(
             client_id=int(payload.get("client_id", 0)),
             request_id=_coerce_bytes(payload.get("request_id", b"")),
@@ -360,13 +385,21 @@ class SteamAuthClient:
         code_actions = [
             action
             for action in auth_session.allowed_confirmations
-            if action.type in {GUARD_EMAIL_CODE, GUARD_DEVICE_CODE}
+            if action.type in SUPPORTED_CODE_GUARDS
         ]
         confirmation_actions = [
             action
             for action in auth_session.allowed_confirmations
-            if action.type in {GUARD_DEVICE_CONFIRMATION, GUARD_EMAIL_CONFIRMATION}
+            if action.type in SUPPORTED_CONFIRMATION_GUARDS
         ]
+
+        if not code_actions and not confirmation_actions:
+            unsupported = _unsupported_guard_actions(auth_session.allowed_confirmations)
+            if unsupported:
+                raise SteamAuthUnsupportedChallengeError(
+                    "Steam login requires unsupported guard action(s): "
+                    + ", ".join(action.label for action in unsupported)
+                )
 
         if code_actions:
             action = code_actions[0]
@@ -399,6 +432,14 @@ class SteamAuthClient:
                     steam_guard_machine_token=(
                         str(payload["new_guard_data"]) if payload.get("new_guard_data") else None
                     ),
+                )
+            if payload.get("agreement_session_url"):
+                raise SteamAuthUnsupportedChallengeError(
+                    "Steam login requires completing an additional Steam agreement or risk challenge"
+                )
+            if payload.get("new_challenge_url"):
+                raise SteamAuthUnsupportedChallengeError(
+                    "Steam login requires an unsupported additional Steam authentication challenge"
                 )
             sleep(max(0.5, min(auth_session.poll_interval, 5.0)))
 

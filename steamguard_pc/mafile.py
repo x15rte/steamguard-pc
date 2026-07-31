@@ -1,9 +1,15 @@
+import base64
+import binascii
 import json
 import os
 from collections.abc import Sequence
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
+
+from cryptography.hazmat.primitives import hashes, padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .crypto import generate_device_id, validate_base64_secret
 from .models import ImportedSteamGuard
@@ -17,6 +23,18 @@ _CLOUD_SYNC_DIRS = {
     "iclouddrive",
     "icloud photos",
 }
+
+SDA_PBKDF2_ITERATIONS = 50000
+SDA_KEY_BYTES = 32
+SDA_AES_BLOCK_BITS = 128
+
+
+class EncryptedMaFileRequiresPasskey(ValueError):
+    pass
+
+
+class MaFileDecryptionError(ValueError):
+    pass
 
 
 def default_mafile_search_dirs() -> list[Path]:
@@ -135,13 +153,72 @@ def parse_mafile(raw: dict[str, object]) -> ImportedSteamGuard:
     )
 
 
-def load_mafile(path: str | Path) -> ImportedSteamGuard:
+def _load_sda_manifest_entry(path: Path) -> dict[str, object]:
+    manifest_path = path.parent / "manifest.json"
     try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except JSONDecodeError as exc:
-        raise ValueError(
-            "encrypted or unsupported .maFile; decrypt it in the source app and retry"
-        ) from exc
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("encrypted SDA .maFile requires sibling manifest.json") from exc
+
+    if not isinstance(manifest, dict) or manifest.get("encrypted") is not True:
+        raise ValueError("unsupported .maFile format")
+
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError("encrypted SDA .maFile is missing a matching manifest entry")
+
+    selected_filename = path.name.casefold()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        filename = entry.get("filename")
+        if isinstance(filename, str) and filename.casefold() == selected_filename:
+            salt = entry.get("encryption_salt")
+            iv = entry.get("encryption_iv")
+            if not isinstance(salt, str) or not salt or not isinstance(iv, str) or not iv:
+                raise ValueError("encrypted SDA .maFile manifest entry is missing encryption_salt or encryption_iv")
+            return entry
+
+    raise ValueError("encrypted SDA .maFile is missing a matching manifest entry")
+
+
+def decrypt_sda_mafile_text(encrypted_text: str, passkey: str, salt_b64: str, iv_b64: str) -> str:
+    if not passkey:
+        raise EncryptedMaFileRequiresPasskey("encrypted SDA .maFile requires SDA encryption passkey")
+
+    try:
+        ciphertext = base64.b64decode(encrypted_text.strip(), validate=True)
+        salt = base64.b64decode(salt_b64, validate=True)
+        iv = base64.b64decode(iv_b64, validate=True)
+        key = PBKDF2HMAC(
+            algorithm=hashes.SHA1(),
+            length=SDA_KEY_BYTES,
+            salt=salt,
+            iterations=SDA_PBKDF2_ITERATIONS,
+        ).derive(passkey.encode("utf-8"))
+        decryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
+        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+        unpadder = padding.PKCS7(SDA_AES_BLOCK_BITS).unpadder()
+        plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
+        return plaintext.decode("utf-8")
+    except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
+        raise MaFileDecryptionError("SDA passkey is incorrect or encrypted .maFile is corrupted") from exc
+
+
+def load_mafile(path: str | Path, passkey: str | None = None) -> ImportedSteamGuard:
+    selected = Path(path)
+    text = selected.read_text(encoding="utf-8")
+    try:
+        raw = json.loads(text)
+    except JSONDecodeError:
+        entry = _load_sda_manifest_entry(selected)
+        if passkey is None:
+            raise EncryptedMaFileRequiresPasskey("encrypted SDA .maFile requires SDA encryption passkey")
+        plaintext = decrypt_sda_mafile_text(text, passkey, entry["encryption_salt"], entry["encryption_iv"])
+        try:
+            raw = json.loads(plaintext)
+        except JSONDecodeError as exc:
+            raise MaFileDecryptionError("SDA passkey is incorrect or encrypted .maFile is corrupted") from exc
 
     if not isinstance(raw, dict):
         raise ValueError("unsupported .maFile format")

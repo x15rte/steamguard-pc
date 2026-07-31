@@ -12,6 +12,10 @@ SHARED_SECRET = "MDEyMzQ1Njc4OWFiY2RlZmdoaWo="
 IDENTITY_SECRET = "aWRlbnRpdHktc2VjcmV0LTEyMzQ="
 STEAMID64 = "76561197960287930"
 REVOCATION_CODE = "R12345"
+SDA_PASSKEY = "correct horse battery staple"
+SDA_SALT = "MTIzNDU2Nzg="
+SDA_IV = "MTIzNDU2Nzg5MGFiY2RlZg=="
+SDA_CIPHERTEXT = "q4/CnhwdcdRzn7l4L80qTkpyQEAgef8g09baxLG10KMPcav12ZNzruJneluSEKCCHlnyK/ju/J4kvtqeKCSrSc29SFc4pBlOXdJWxxZL8Vi6pm0abP6DlSpGTuHJAbKtVVP2iYCJvx9icvJw7tEnA1EpQiUIPHdn9yEQkU6CAgta3XdpBLl+vR3EfxeG9YGlOGZJzjnVKlfgzRRcRw660RUGT2s+pLMqQFa4ovB/szbqstAHnLKDVaRmnQXUCH6wwZovLYaflUoec+g1GGWOmBGKdANBedpz1xUUqP0SXeaucrYoLVb3LWat/HYEvGyzOiv+Hv8cMhEj0IK75MQ44w=="
 
 
 def test_code_timestamp_prints_deterministic_code(monkeypatch, capsys):
@@ -182,6 +186,71 @@ def test_import_mafile_does_not_print_secret_values(monkeypatch, tmp_path, capsy
     for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE, "secure-cookie", "session-cookie"]:
         assert secret not in printed
 
+
+
+def write_encrypted_sda_cli_fixture(tmp_path):
+    mafiles_dir = tmp_path / "maFiles"
+    mafiles_dir.mkdir()
+    mafile_path = mafiles_dir / "account.maFile"
+    mafile_path.write_text(SDA_CIPHERTEXT, encoding="utf-8")
+    (mafiles_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "encrypted": True,
+                "entries": [
+                    {
+                        "filename": "account.maFile",
+                        "steamid": 76561197960287930,
+                        "encryption_salt": SDA_SALT,
+                        "encryption_iv": SDA_IV,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return mafile_path
+
+
+def test_import_encrypted_sda_mafile_prompts_passkey_without_printing_secrets(monkeypatch, tmp_path, capsys):
+    mafile_path = write_encrypted_sda_cli_fixture(tmp_path)
+
+    def getpass(prompt):
+        assert prompt == "SDA encryption passkey: "
+        return SDA_PASSKEY
+
+    def store_imported_guard(imported):
+        assert imported.steamid64 == STEAMID64
+        assert imported.account_name == "fixture"
+        assert imported.shared_secret == SHARED_SECRET
+        assert imported.identity_secret == IDENTITY_SECRET
+        assert imported.revocation_code == REVOCATION_CODE
+        assert imported.steam_login_secure == "secure-cookie"
+        assert imported.sessionid == "session-cookie"
+        return AccountMetadata(
+            steamid64=imported.steamid64,
+            account_name=imported.account_name,
+            device_id=imported.device_id,
+            last_imported_at="2026-07-31T00:00:00Z",
+        )
+
+    monkeypatch.setattr(cli.getpass, "getpass", getpass)
+    monkeypatch.setattr(cli.storage, "store_imported_guard", store_imported_guard)
+
+    assert cli.main(["import-mafile", str(mafile_path)]) == 0
+
+    output = capsys.readouterr().out
+    assert f"Imported fixture ({STEAMID64})" in output
+    for secret in [
+        SDA_PASSKEY,
+        SDA_CIPHERTEXT,
+        "shared_secret",
+        "identity_secret",
+        REVOCATION_CODE,
+        "secure-cookie",
+        "session-cookie",
+    ]:
+        assert secret not in output
 
 def _seed_cli_backup_account():
     metadata = AccountMetadata(
@@ -647,6 +716,81 @@ def test_cancel_all_reviews_and_submits_displayed_ids(monkeypatch, capsys):
     assert "--- confirmation 1 of 2 ---" in output
     assert "--- confirmation 2 of 2 ---" in output
     assert "Cancelled 2 confirmations." in output
+
+
+def test_approve_all_blocks_unknown_confirmation_types(monkeypatch, capsys):
+    calls = []
+    current = [
+        Confirmation(
+            id="abc",
+            nonce="nonce-abc",
+            creator_id="creator-abc",
+            type_name="Trade",
+            headline="Trade offer",
+            summary="First summary",
+        ),
+        Confirmation(
+            id="ghi",
+            nonce="nonce-ghi",
+            creator_id="creator-ghi",
+            type_name="Phone number change",
+            headline="Change phone",
+            summary="Unknown",
+        ),
+    ]
+    _patch_batch_confirmation_context(monkeypatch, calls, current=current)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+
+    assert cli.main(["approve-all", STEAMID64]) == 1
+
+    output = capsys.readouterr().out
+    assert calls == []
+    assert "Batch approval blocked: approve-all only supports Trade and Market listing confirmations." in output
+    assert "blocked: ghi\tPhone number change\tcreator-ghi" in output
+
+
+def test_cancel_all_allows_unknown_confirmation_types(monkeypatch, capsys):
+    calls = []
+    current = [
+        Confirmation(
+            id="abc",
+            nonce="nonce-abc",
+            creator_id="creator-abc",
+            type_name="Trade",
+            headline="Trade offer",
+            summary="First summary",
+        ),
+        Confirmation(
+            id="ghi",
+            nonce="nonce-ghi",
+            creator_id="creator-ghi",
+            type_name="Phone number change",
+            headline="Change phone",
+            summary="Unknown",
+        ),
+    ]
+    _patch_batch_confirmation_context(monkeypatch, calls, current=current)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"CANCEL ALL 2 CONFIRMATIONS {STEAMID64}\n"))
+
+    assert cli.main(["cancel-all", STEAMID64]) == 0
+
+    assert calls[0]["ids"] == ["abc", "ghi"]
+    assert calls[0]["accept"] is False
+
+
+def test_approve_all_allows_numeric_trade_and_market_types(monkeypatch, capsys):
+    calls = []
+    current = [
+        Confirmation(id="abc", nonce="nonce-abc", creator_id="creator-abc", type=2, type_name=None),
+        Confirmation(id="def", nonce="nonce-def", creator_id="creator-def", type=3, type_name=None),
+    ]
+    _patch_batch_confirmation_context(monkeypatch, calls, current=current)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"APPROVE ALL 2 CONFIRMATIONS {STEAMID64}\n"))
+
+    assert cli.main(["approve-all", STEAMID64]) == 0
+
+    assert calls[0]["ids"] == ["abc", "def"]
+    assert calls[0]["accept"] is True
 
 
 def test_approve_all_no_pending_confirmations(monkeypatch, capsys):

@@ -1,15 +1,20 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from steamguard_pc import storage
-from steamguard_pc.mafile import find_mafile_candidates, parse_mafile
+from steamguard_pc.mafile import EncryptedMaFileRequiresPasskey, MaFileDecryptionError, find_mafile_candidates, load_mafile, parse_mafile
 
 
 SHARED_SECRET = "MDEyMzQ1Njc4OWFiY2RlZmdoaWo="
 IDENTITY_SECRET = "aWRlbnRpdHktc2VjcmV0LTEyMzQ="
 STEAMID64 = "76561197960287930"
 DEVICE_ID = "android:6d3f10d9-6369-a1ae-97a0-94df28b95192"
+SDA_PASSKEY = "correct horse battery staple"
+SDA_SALT = "MTIzNDU2Nzg="
+SDA_IV = "MTIzNDU2Nzg5MGFiY2RlZg=="
+SDA_CIPHERTEXT = "q4/CnhwdcdRzn7l4L80qTkpyQEAgef8g09baxLG10KMPcav12ZNzruJneluSEKCCHlnyK/ju/J4kvtqeKCSrSc29SFc4pBlOXdJWxxZL8Vi6pm0abP6DlSpGTuHJAbKtVVP2iYCJvx9icvJw7tEnA1EpQiUIPHdn9yEQkU6CAgta3XdpBLl+vR3EfxeG9YGlOGZJzjnVKlfgzRRcRw660RUGT2s+pLMqQFa4ovB/szbqstAHnLKDVaRmnQXUCH6wwZovLYaflUoec+g1GGWOmBGKdANBedpz1xUUqP0SXeaucrYoLVb3LWat/HYEvGyzOiv+Hv8cMhEj0IK75MQ44w=="
 
 
 def valid_mafile(**overrides):
@@ -28,6 +33,65 @@ def valid_mafile(**overrides):
     }
     raw.update(overrides)
     return raw
+
+def write_encrypted_sda_fixture(tmp_path) -> Path:
+    mafiles_dir = tmp_path / "maFiles"
+    mafiles_dir.mkdir()
+    mafile_path = mafiles_dir / "account.maFile"
+    mafile_path.write_text(SDA_CIPHERTEXT, encoding="utf-8")
+    (mafiles_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "encrypted": True,
+                "entries": [
+                    {
+                        "filename": "account.maFile",
+                        "steamid": 76561197960287930,
+                        "encryption_salt": SDA_SALT,
+                        "encryption_iv": SDA_IV,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return mafile_path
+
+
+def test_load_encrypted_sda_mafile_uses_manifest_entry(tmp_path):
+    imported = load_mafile(write_encrypted_sda_fixture(tmp_path), passkey=SDA_PASSKEY)
+
+    assert imported.steamid64 == STEAMID64
+    assert imported.account_name == "fixture"
+    assert imported.shared_secret == SHARED_SECRET
+    assert imported.identity_secret == IDENTITY_SECRET
+    assert imported.revocation_code == "R12345"
+    assert imported.steam_login_secure == "secure-cookie"
+    assert imported.sessionid == "session-cookie"
+
+
+def test_load_encrypted_sda_mafile_requires_passkey(tmp_path):
+    with pytest.raises(EncryptedMaFileRequiresPasskey) as excinfo:
+        load_mafile(write_encrypted_sda_fixture(tmp_path))
+
+    assert str(excinfo.value) == "encrypted SDA .maFile requires SDA encryption passkey"
+
+
+def test_load_encrypted_sda_mafile_rejects_wrong_passkey(tmp_path):
+    with pytest.raises(MaFileDecryptionError) as excinfo:
+        load_mafile(write_encrypted_sda_fixture(tmp_path), passkey="wrong passkey")
+
+    assert str(excinfo.value) == "SDA passkey is incorrect or encrypted .maFile is corrupted"
+
+
+def test_load_encrypted_sda_mafile_requires_manifest_entry(tmp_path):
+    mafile_path = tmp_path / "account.maFile"
+    mafile_path.write_text(SDA_CIPHERTEXT, encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        load_mafile(mafile_path)
+
+    assert str(excinfo.value) == "encrypted SDA .maFile requires sibling manifest.json"
 
 
 def test_find_mafile_candidates_discovers_sorted_unique_files(tmp_path):

@@ -99,6 +99,25 @@ def _confirmation_type(confirmation: Confirmation) -> str:
     value = confirmation.type_name if confirmation.type_name is not None else confirmation.type
     return str(value) if value is not None else "-"
 
+KNOWN_BATCH_APPROVAL_TYPES = {2, 3, "2", "3"}
+KNOWN_BATCH_APPROVAL_LABELS = {"trade", "market", "market listing", "marketlisting"}
+
+
+def _confirmation_is_safe_for_batch_approval(confirmation: Confirmation) -> bool:
+    if confirmation.type in KNOWN_BATCH_APPROVAL_TYPES or str(confirmation.type) in KNOWN_BATCH_APPROVAL_TYPES:
+        return True
+    labels = {
+        str(value).replace("_", " ").casefold()
+        for value in (confirmation.type_name, confirmation.type)
+        if value is not None
+    }
+    compact_labels = {label.replace(" ", "") for label in labels}
+    return bool(labels & KNOWN_BATCH_APPROVAL_LABELS or compact_labels & KNOWN_BATCH_APPROVAL_LABELS)
+
+
+def _unsafe_batch_approval_confirmations(confirmations_to_review: list[Confirmation]) -> list[Confirmation]:
+    return [item for item in confirmations_to_review if not _confirmation_is_safe_for_batch_approval(item)]
+
 def _account_label(metadata: storage.AccountMetadata) -> str:
     return f"{metadata.account_name} ({metadata.steamid64})" if metadata.account_name else metadata.steamid64
 
@@ -250,7 +269,16 @@ def _import_mafile_path(path: str | Path) -> tuple[mafile.ImportedSteamGuard, st
     for warning in mafile.unsafe_import_path_warnings(path):
         print(f"Warning: {warning}", file=sys.stderr)
 
-    imported = mafile.load_mafile(path)
+    try:
+        imported = mafile.load_mafile(path)
+    except mafile.EncryptedMaFileRequiresPasskey:
+        passkey = getpass.getpass("SDA encryption passkey: ")
+        if not passkey:
+            raise ValueError("SDA encryption passkey is required")
+        try:
+            imported = mafile.load_mafile(path, passkey=passkey)
+        finally:
+            passkey = ""
     metadata = storage.store_imported_guard(imported)
     label = metadata.account_name or metadata.steamid64
     print(f"Imported {label} ({metadata.steamid64})")
@@ -265,7 +293,7 @@ def _select_mafile_path(explicit_path: str | None) -> Path:
 
     candidates = mafile.find_mafile_candidates()
     if candidates:
-        print("Found decrypted .maFile candidates:")
+        print("Found .maFile candidates:")
         for index, candidate in enumerate(candidates, start=1):
             print(f"  {index}. {candidate}")
         print("Choose a number, type another path, or press Enter to cancel.")
@@ -279,7 +307,7 @@ def _select_mafile_path(explicit_path: str | None) -> Path:
         return Path(choice)
 
     print("No .maFile files found in common locations.")
-    choice = input("Path to decrypted .maFile (blank to cancel): ").strip()
+    choice = input("Path to .maFile (blank to cancel): ").strip()
     if not choice:
         raise ValueError("setup cancelled before import")
     return Path(choice)
@@ -562,7 +590,7 @@ def _cmd_setup(args: argparse.Namespace) -> int:
         print("Choose setup method:")
         print("  1. Sign in and add a new mobile authenticator in this app")
         print("  2. Sign in only to store/refresh Steam Community cookies")
-        print("  3. Import an existing decrypted .maFile")
+        print("  3. Import an existing .maFile (encrypted SDA files supported)")
         choice = input("Setup method [1/2/3]: ").strip()
         if choice == "1":
             metadata = _enroll_with_prompts()
@@ -745,6 +773,14 @@ def _cmd_batch_confirm(args: argparse.Namespace, accept: bool) -> int:
             return 0
 
         _print_batch_confirmation_review(metadata, community_session, identity_secret, current)
+        if accept:
+            unsafe = _unsafe_batch_approval_confirmations(current)
+            if unsafe:
+                print("Batch approval blocked: approve-all only supports Trade and Market listing confirmations.")
+                for confirmation in unsafe:
+                    print(f"blocked: {confirmation.id}\t{_confirmation_type(confirmation)}\t{confirmation.creator_id or '-'}")
+                return 1
+
         action = "APPROVE" if accept else "CANCEL"
         noun = "approval" if accept else "cancellation"
         expected = f"{action} ALL {len(current)} CONFIRMATIONS {args.steamid64}"
@@ -807,7 +843,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Guided first-run setup.",
         formatter_class=_HelpFormatter,
     )
-    setup.add_argument("--mafile", metavar="PATH", help="Import this decrypted .maFile directly.")
+    setup.add_argument("--mafile", metavar="PATH", help="Import this .maFile directly; encrypted SDA files prompt for the SDA passkey.")
     setup.add_argument("--skip-cookies", action="store_true", help="Skip cookie setup after .maFile import.")
     setup.set_defaults(func=_cmd_setup)
 
@@ -831,11 +867,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     import_mafile = subparsers.add_parser(
         "import-mafile",
-        help="Import a decrypted .maFile.",
-        description="Import a decrypted Steam Desktop Authenticator .maFile into secret storage.",
+        help="Import a .maFile.",
+        description="Import a Steam Desktop Authenticator .maFile into secret storage; encrypted SDA files prompt for the SDA passkey.",
         formatter_class=_HelpFormatter,
     )
-    import_mafile.add_argument("path", metavar="PATH", help="Path to a decrypted .maFile JSON export.")
+    import_mafile.add_argument("path", metavar="PATH", help="Path to a Steam Desktop Authenticator .maFile.")
     import_mafile.set_defaults(func=_cmd_import_mafile)
 
     export_backup = subparsers.add_parser(
