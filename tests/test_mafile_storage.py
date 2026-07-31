@@ -90,6 +90,7 @@ def test_store_imported_guard_keeps_secrets_out_of_config(keyring_store):
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:identity_secret")] == IDENTITY_SECRET
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:steamLoginSecure")] == "secure-cookie"
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:sessionid")] == "session-cookie"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:revocation_code")] == "R12345"
 
     config_text = storage.config_path().read_text(encoding="utf-8")
     config = json.loads(config_text)

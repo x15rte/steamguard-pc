@@ -28,6 +28,12 @@ List confirmations:
 .\.venv\Scripts\steamguard-pc confirmations <steamid64>
 ```
 
+Back up the post-enrollment revocation code:
+
+```powershell
+.\.venv\Scripts\steamguard-pc revocation-code <steamid64>
+```
+
 ## Workflows
 
 ### Add a new authenticator inside this app
@@ -53,10 +59,12 @@ The command:
    ADD AUTHENTICATOR <steamid64>
    ```
 
-7. Calls Steam's add-authenticator endpoint.
+7. Calls Steam's add-authenticator endpoint without adding or linking a phone number.
 8. Stores the generated authenticator secrets before finalization.
-9. Prompts for the Steam activation code from email or SMS.
-10. Finalizes the authenticator.
+9. Displays the Steam Guard revocation code if Steam returned one. Steam formats it as `R` followed by five digits. Store it offline immediately; it can remove the authenticator from the account.
+10. Prompts for the Steam activation code from email or SMS. If no code arrives, the command prints an exact `SEND ACTIVATION EMAIL <steamid64>` phrase that asks Steam to send an activation-code email.
+11. Finalizes the authenticator.
+12. Prints where to reveal the stored revocation code later.
 
 Example:
 
@@ -64,10 +72,30 @@ Example:
 .\.venv\Scripts\steamguard-pc enroll my_steam_login_name
 ```
 
-The final activation code may arrive by email or SMS depending on Steam's account state. The prompt is:
+The final activation code may arrive by email or SMS depending on Steam's account state. Steam's official setup also has a no-phone path; this CLI does not add or link a phone number. The prompt is:
 
 ```text
 Steam activation code from email or SMS:
+```
+
+### Back up the Steam Guard revocation code
+
+Steam's `revocation_code` is `R` followed by five digits. It can remove the authenticator from the account. It is not the seven-digit recovery code Steam asks for during website sign-in recovery. Reveal a stored copy only in a private terminal and store it somewhere safe outside this machine.
+
+```powershell
+.\.venv\Scripts\steamguard-pc revocation-code <steamid64>
+```
+
+The command requires this exact phrase before printing the code:
+
+```text
+SHOW REVOCATION CODE <steamid64>
+```
+
+If the phrase differs, it prints:
+
+```text
+Revocation code display cancelled.
 ```
 
 ### Sign in only / refresh Steam Community cookies
@@ -239,6 +267,28 @@ For an empty config:
 ```text
 No accounts imported.
 ```
+
+### `revocation-code STEAMID64`
+
+Reveals the stored Steam Guard revocation code. This code is `R` followed by five digits and can remove the authenticator from the account.
+
+```powershell
+.\.venv\Scripts\steamguard-pc revocation-code <steamid64>
+```
+
+Before printing the code, it warns that the code can remove the authenticator and requires the exact phrase:
+
+```text
+SHOW REVOCATION CODE <steamid64>
+```
+
+Successful output:
+
+```text
+Steam Guard revocation code for <account_name-or-steamid64> (<steamid64>): <revocation_code>
+```
+
+The revocation code is sensitive. Do not paste it into logs, chat, issue reports, or screenshots.
 
 ### `import-mafile PATH`
 
@@ -416,6 +466,10 @@ The account has metadata but no stored login-code secret. Enroll an authenticato
 ### `missing identity_secret for <steamid64>`
 
 The account has metadata but no stored confirmation secret. Enroll an authenticator or import a `.maFile` for that account.
+
+### `missing revocation_code for <steamid64>`
+
+The account has metadata but no stored Steam Guard revocation code. Re-import a `.maFile` that contains `revocation_code`, or store the original R##### revocation code separately if it was shown during authenticator enrollment.
 
 ### `missing Steam Community cookies for <steamid64>`
 

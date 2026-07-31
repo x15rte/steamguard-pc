@@ -45,7 +45,7 @@ class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
 HELP_DESCRIPTION = """\
 SteamGuardPC is a Windows-focused Steam Guard helper.
 
-It stores authenticator secrets, Steam session tokens, and Steam Community cookies in Windows secret storage through keyring. It can generate offline login codes, sign in to refresh web sessions, enroll a new authenticator, import a decrypted .maFile, and act on one confirmation only after explicit typed consent.
+It stores authenticator secrets, Steam session tokens, Steam Community cookies, and Steam Guard revocation codes in Windows secret storage through keyring. It can generate offline login codes, sign in to refresh web sessions, enroll a new authenticator, import a decrypted .maFile, reveal a stored revocation code after explicit typed consent, and act on one confirmation only after explicit typed consent.
 """
 
 
@@ -61,6 +61,10 @@ Common workflows:
 
   steamguard-pc code STEAMID64
       Print the current 5-character Steam Guard login code and seconds remaining.
+
+  steamguard-pc revocation-code STEAMID64
+      Reveal the stored R##### Steam Guard revocation code only after typing
+      SHOW REVOCATION CODE <steamid64>. This removes the authenticator.
 
   steamguard-pc confirmations STEAMID64
       List pending mobile confirmations for a stored account.
@@ -172,6 +176,8 @@ def _import_mafile_path(path: str | Path) -> tuple[mafile.ImportedSteamGuard, st
     metadata = storage.store_imported_guard(imported)
     label = metadata.account_name or metadata.steamid64
     print(f"Imported {label} ({metadata.steamid64})")
+    if imported.revocation_code:
+        print(f"Steam Guard revocation code was stored. Run `steamguard-pc revocation-code {metadata.steamid64}` in a private terminal and store it offline.")
     return imported, metadata
 
 
@@ -293,22 +299,11 @@ def _login_and_store(account_name: str | None = None) -> tuple[LoginResult, stor
     return result, metadata
 
 
-def _add_phone_number_if_needed(client: enrollment.EnrollmentClient, result: LoginResult) -> None:
-    phone_number = input("Phone number to add to this Steam account (blank to cancel): ").strip()
-    if not phone_number:
-        raise ValueError("phone number is required to add an authenticator")
-    country_code = input("Phone country code (blank to use Steam account country): ").strip()
-    if not country_code:
-        country_code = client.get_user_country(result.access_token, result.steamid64)
-
-    phone_result = client.set_account_phone_number(result.access_token, phone_number, country_code)
-    if phone_result.confirmation_email_address:
-        print(f"Steam sent a phone-number confirmation email to {phone_result.confirmation_email_address}.")
-        input("Click the confirmation link, then press Enter.")
-        if client.is_waiting_for_email_confirmation(result.access_token):
-            raise ValueError("Steam is still waiting for email confirmation")
-    client.send_phone_verification_code(result.access_token)
-    print("Steam sent a phone verification code.")
+def _print_revocation_code(metadata: storage.AccountMetadata, revocation_code: str) -> None:
+    label = metadata.account_name or metadata.steamid64
+    print(f"Steam Guard revocation code for {label} ({metadata.steamid64}): {revocation_code}")
+    print("Store this code offline. Steam formats it as R followed by five digits, and it can remove this authenticator from the account.")
+    print("This is not the seven-digit recovery code Steam requests during account sign-in recovery.")
 
 
 def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMetadata:
@@ -319,21 +314,12 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
         raise ValueError("authenticator enrollment cancelled")
 
     client = enrollment.EnrollmentClient()
-    try:
-        add_result = client.add_authenticator(
-            result.access_token,
-            result.steamid64,
-            account_name=result.account_name,
-            device_id=metadata.device_id,
-        )
-    except enrollment.PhoneNumberRequiredError:
-        _add_phone_number_if_needed(client, result)
-        add_result = client.add_authenticator(
-            result.access_token,
-            result.steamid64,
-            account_name=result.account_name,
-            device_id=metadata.device_id,
-        )
+    add_result = client.add_authenticator(
+        result.access_token,
+        result.steamid64,
+        account_name=result.account_name,
+        device_id=metadata.device_id,
+    )
 
     imported = replace(
         add_result.imported,
@@ -344,7 +330,16 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
     )
     metadata = storage.store_imported_guard(imported)
     print("Authenticator secrets were stored before finalization.")
+    if imported.revocation_code:
+        _print_revocation_code(metadata, imported.revocation_code)
+    print("Steam may send the activation code by email or SMS. A phone number is not required when Steam offers its no-phone email path.")
+    resend_phrase = f"SEND ACTIVATION EMAIL {result.steamid64}"
+    print(f"If no code arrives, type {resend_phrase!r} instead of the code to ask Steam to email another activation code.")
     activation_code = input("Steam activation code from email or SMS: ").strip()
+    if activation_code == resend_phrase:
+        client.send_activation_email(result.access_token, result.steamid64)
+        print("Requested an activation-code email from Steam.")
+        activation_code = input("Steam activation code from email or SMS: ").strip()
     if not activation_code:
         raise ValueError("Steam activation code is required")
     client.finalize_authenticator(
@@ -355,7 +350,7 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
     )
     print(f"Authenticator added and finalized for {metadata.account_name or metadata.steamid64} ({metadata.steamid64}).")
     if imported.revocation_code:
-        print("Revocation code was stored in Windows secret storage; back it up from a secure machine account.")
+        print(f"Stored revocation code remains available with `steamguard-pc revocation-code {metadata.steamid64}`.")
     return metadata
 
 
@@ -484,6 +479,23 @@ def _cmd_confirmations(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_revocation_code(args: argparse.Namespace) -> int:
+    metadata = storage.load_accounts().get(args.steamid64)
+    if metadata is None:
+        raise KeyError(f"missing account metadata for {args.steamid64}")
+    print("The Steam Guard revocation code can remove this authenticator from the account.")
+    print("It is R followed by five digits, not the seven-digit recovery code Steam requests during sign-in recovery.")
+    print("Only reveal it in a private terminal where nobody else can see or record it.")
+    expected = f"SHOW REVOCATION CODE {args.steamid64}"
+    if input(f"Type {expected!r} to show the revocation code: ") != expected:
+        print("Revocation code display cancelled.")
+        return 1
+
+    revocation_code = storage.get_required_secret(args.steamid64, "revocation_code")
+    _print_revocation_code(metadata, revocation_code)
+    return 0
+
+
 def _cmd_approve(args: argparse.Namespace) -> int:
     metadata, identity_secret, community_session, target = _find_current_confirmation(
         args.steamid64,
@@ -552,6 +564,15 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=_HelpFormatter,
     )
     accounts.set_defaults(func=_cmd_accounts)
+
+    revocation_code = subparsers.add_parser(
+        "revocation-code",
+        help="Reveal the stored R##### revocation code after typed consent.",
+        description="Reveal the stored Steam Guard revocation code. This can remove the authenticator and is not the seven-digit login recovery code, so the command requires `SHOW REVOCATION CODE <steamid64>` before printing it.",
+        formatter_class=_HelpFormatter,
+    )
+    revocation_code.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
+    revocation_code.set_defaults(func=_cmd_revocation_code)
 
     import_mafile = subparsers.add_parser(
         "import-mafile",

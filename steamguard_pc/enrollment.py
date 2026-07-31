@@ -11,13 +11,10 @@ STEAM_API_BASE = "https://api.steampowered.com"
 QUERY_TIME_URL = f"{STEAM_API_BASE}/ITwoFactorService/QueryTime/v1/"
 ADD_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/AddAuthenticator/v1/"
 FINALIZE_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/FinalizeAddAuthenticator/v1/"
-GET_COUNTRY_URL = f"{STEAM_API_BASE}/IUserAccountService/GetUserCountry/v1/"
-SET_PHONE_URL = f"{STEAM_API_BASE}/IPhoneService/SetAccountPhoneNumber/v1/"
-WAITING_EMAIL_URL = f"{STEAM_API_BASE}/IPhoneService/IsAccountWaitingForEmailConfirmation/v1/"
-SEND_PHONE_CODE_URL = f"{STEAM_API_BASE}/IPhoneService/SendPhoneVerificationCode/v1/"
+SEND_EMAIL_URL = f"{STEAM_API_BASE}/ITwoFactorService/SendEmail/v1/"
 REQUEST_TIMEOUT = 30
 AUTHENTICATOR_TYPE_MOBILE_APP = "1"
-DEFAULT_SMS_PHONE_ID = "1"
+ADD_AUTHENTICATOR_VERSION = "2"
 
 
 class EnrollmentError(RuntimeError):
@@ -25,10 +22,6 @@ class EnrollmentError(RuntimeError):
 
 
 class EnrollmentTransportError(EnrollmentError):
-    pass
-
-
-class PhoneNumberRequiredError(EnrollmentError):
     pass
 
 
@@ -44,12 +37,6 @@ class BadActivationCodeError(EnrollmentError):
 class AddAuthenticatorResult:
     imported: ImportedSteamGuard
     raw: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class SetPhoneNumberResult:
-    confirmation_email_address: str | None = None
-    phone_number_formatted: str | None = None
 
 
 class EnrollmentClient:
@@ -80,7 +67,7 @@ class EnrollmentClient:
                 "authenticator_time": str(self.query_steam_time()),
                 "authenticator_type": AUTHENTICATOR_TYPE_MOBILE_APP,
                 "device_identifier": device_id,
-                "sms_phone_id": DEFAULT_SMS_PHONE_ID,
+                "version": ADD_AUTHENTICATOR_VERSION,
             },
         )
         response = payload.get("response", payload)
@@ -88,8 +75,6 @@ class EnrollmentClient:
             raise EnrollmentError("Steam add-authenticator response is malformed")
 
         status = int(response.get("status", 0) or 0)
-        if status == 2:
-            raise PhoneNumberRequiredError("Steam account needs a verified phone number before adding an authenticator")
         if status == 29:
             raise AuthenticatorAlreadyPresentError("Steam account already has a mobile authenticator")
         if status != 1:
@@ -131,7 +116,6 @@ class EnrollmentClient:
                     "authenticator_code": steam_totp(shared_secret, timestamp),
                     "authenticator_time": str(timestamp),
                     "activation_code": activation_code,
-                    "validate_sms_code": "1",
                 },
             )
             response = payload.get("response", payload)
@@ -149,49 +133,15 @@ class EnrollmentClient:
 
         raise EnrollmentError("Steam could not verify authenticator codes during finalization")
 
-    def get_user_country(self, access_token: str, steamid64: str) -> str:
-        payload = self._post(
-            GET_COUNTRY_URL,
-            params={"access_token": access_token},
-            data={"steamid": steamid64},
-        )
-        response = payload.get("response", payload)
-        country = response.get("country") if isinstance(response, dict) else None
-        if not country:
-            raise EnrollmentError("Steam country response is missing country")
-        return str(country)
-
-    def set_account_phone_number(
-        self,
-        access_token: str,
-        phone_number: str,
-        phone_country_code: str,
-    ) -> SetPhoneNumberResult:
-        payload = self._post(
-            SET_PHONE_URL,
+    def send_activation_email(self, access_token: str, steamid64: str) -> None:
+        self._post(
+            SEND_EMAIL_URL,
             params={"access_token": access_token},
             data={
-                "phone_number": phone_number,
-                "phone_country_code": phone_country_code,
+                "steamid": steamid64,
+                "include_activation_code": "1",
             },
         )
-        response = payload.get("response", payload)
-        if not isinstance(response, dict):
-            raise EnrollmentError("Steam phone-number response is malformed")
-        return SetPhoneNumberResult(
-            confirmation_email_address=_optional_str(response.get("confirmation_email_address")),
-            phone_number_formatted=_optional_str(response.get("phone_number_formatted")),
-        )
-
-    def is_waiting_for_email_confirmation(self, access_token: str) -> bool:
-        payload = self._post(WAITING_EMAIL_URL, params={"access_token": access_token}, data={})
-        response = payload.get("response", payload)
-        if not isinstance(response, dict):
-            raise EnrollmentError("Steam email-confirmation response is malformed")
-        return bool(response.get("awaiting_email_confirmation"))
-
-    def send_phone_verification_code(self, access_token: str) -> None:
-        self._post(SEND_PHONE_CODE_URL, params={"access_token": access_token}, data={})
 
     def _post(
         self,

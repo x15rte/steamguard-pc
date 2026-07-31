@@ -119,7 +119,9 @@ If keyring fails, fix the Windows/Python keyring backend. Do not add plaintext s
 
 `config.json` contains only metadata. Losing Windows Credential Manager entries or deleting keyring secrets can make the app unable to generate codes or confirmations.
 
-If you enroll a new authenticator, make sure you have a safe recovery plan. Steam's revocation code is critical account-recovery material.
+If you enroll a new authenticator, make sure you have a safe recovery plan. Steam's `revocation_code` is `R` followed by five digits. It can remove the authenticator from the account. `enroll` displays it before asking for the email/SMS activation code when Steam returns one, does not add or link a phone number, and `steamguard-pc revocation-code <steamid64>` reveals the stored revocation code later after exact typed consent.
+
+Store it offline. Do not paste it into logs, chat, issue reports, or screenshots.
 
 ### Authenticator enrollment changes account state
 

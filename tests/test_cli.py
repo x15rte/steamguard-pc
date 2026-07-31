@@ -10,6 +10,7 @@ from steamguard_pc.models import AccountMetadata, Confirmation
 SHARED_SECRET = "MDEyMzQ1Njc4OWFiY2RlZmdoaWo="
 IDENTITY_SECRET = "aWRlbnRpdHktc2VjcmV0LTEyMzQ="
 STEAMID64 = "76561197960287930"
+REVOCATION_CODE = "R12345"
 
 
 def test_code_timestamp_prints_deterministic_code(monkeypatch, capsys):
@@ -32,12 +33,38 @@ def test_top_level_help_is_descriptive(capsys):
     output = capsys.readouterr().out
     assert "SteamGuardPC is a Windows-focused Steam Guard helper." in output
     assert "Common workflows:" in output
-    assert "steamguard-pc setup" in output
-    assert "shared_secret" in output
+    assert "revocation-code" in output
     assert "commands:" in output
     assert "setup" in output
     assert "Guided first-run setup." in output
     assert "Run `steamguard-pc COMMAND -h`" in output
+
+
+def test_revocation_code_requires_exact_phrase(monkeypatch, keyring_store, capsys):
+    cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture"))
+    cli.storage.put_secret(STEAMID64, "revocation_code", REVOCATION_CODE)
+    monkeypatch.setattr("sys.stdin", io.StringIO("SHOW\n"))
+
+    assert cli.main(["revocation-code", STEAMID64]) == 1
+
+    output = capsys.readouterr().out
+    assert "Revocation code display cancelled." in output
+    assert REVOCATION_CODE not in output
+
+
+def test_revocation_code_prints_after_exact_phrase(monkeypatch, keyring_store, capsys):
+    cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture"))
+    cli.storage.put_secret(STEAMID64, "revocation_code", REVOCATION_CODE)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"SHOW REVOCATION CODE {STEAMID64}\n"))
+
+    assert cli.main(["revocation-code", STEAMID64]) == 0
+
+    output = capsys.readouterr().out
+    assert "can remove this authenticator" in output
+    assert "not the seven-digit recovery code" in output
+    assert "R followed by five digits" in output
+    assert f"Steam Guard revocation code for fixture ({STEAMID64}): {REVOCATION_CODE}" in output
+
 
 def test_import_mafile_does_not_print_secret_values(monkeypatch, tmp_path, capsys):
     mafile_path = tmp_path / "account.maFile"
@@ -48,6 +75,7 @@ def test_import_mafile_does_not_print_secret_values(monkeypatch, tmp_path, capsy
                 "account_name": "fixture",
                 "shared_secret": SHARED_SECRET,
                 "identity_secret": IDENTITY_SECRET,
+                "revocation_code": REVOCATION_CODE,
                 "Session": {
                     "SteamLoginSecure": "secure-cookie",
                     "SessionID": "session-cookie",
@@ -60,6 +88,7 @@ def test_import_mafile_does_not_print_secret_values(monkeypatch, tmp_path, capsy
     def store_imported_guard(imported):
         assert imported.shared_secret == SHARED_SECRET
         assert imported.identity_secret == IDENTITY_SECRET
+        assert imported.revocation_code == REVOCATION_CODE
         assert imported.steam_login_secure == "secure-cookie"
         assert imported.sessionid == "session-cookie"
         return AccountMetadata(
@@ -74,8 +103,11 @@ def test_import_mafile_does_not_print_secret_values(monkeypatch, tmp_path, capsy
     assert cli.main(["import-mafile", str(mafile_path)]) == 0
 
     printed = capsys.readouterr().out
-    assert printed == f"Imported fixture ({STEAMID64})\n"
-    for secret in [SHARED_SECRET, IDENTITY_SECRET, "secure-cookie", "session-cookie"]:
+    assert printed == (
+        f"Imported fixture ({STEAMID64})\n"
+        f"Steam Guard revocation code was stored. Run `steamguard-pc revocation-code {STEAMID64}` in a private terminal and store it offline.\n"
+    )
+    for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE, "secure-cookie", "session-cookie"]:
         assert secret not in printed
 
 
@@ -239,12 +271,14 @@ def test_enroll_command_stores_generated_secrets_and_finalizes(monkeypatch, keyr
                     "shared_secret": SHARED_SECRET,
                     "identity_secret": IDENTITY_SECRET,
                     "device_id": "android:fixture",
+                    "revocation_code": REVOCATION_CODE,
                 }
             )
             return cli.enrollment.AddAuthenticatorResult(imported=imported, raw={})
 
         def finalize_authenticator(self, access_token, steamid64, shared_secret, activation_code):
             calls.append(("finalize", access_token, steamid64, shared_secret, activation_code))
+
 
     monkeypatch.setattr(cli, "_login_and_store", lambda account_name: (result, metadata))
     monkeypatch.setattr(cli.enrollment, "EnrollmentClient", FakeEnrollmentClient)
@@ -254,9 +288,14 @@ def test_enroll_command_stores_generated_secrets_and_finalizes(monkeypatch, keyr
 
     assert keyring_store[(cli.storage.SERVICE, f"{STEAMID64}:shared_secret")] == SHARED_SECRET
     assert keyring_store[(cli.storage.SERVICE, f"{STEAMID64}:identity_secret")] == IDENTITY_SECRET
+    assert keyring_store[(cli.storage.SERVICE, f"{STEAMID64}:revocation_code")] == REVOCATION_CODE
     assert calls[-1] == ("finalize", "access-token", STEAMID64, SHARED_SECRET, "12345")
     output = capsys.readouterr().out
     assert f"Authenticator added and finalized for fixture ({STEAMID64})." in output
+    assert f"Steam Guard revocation code for fixture ({STEAMID64}): {REVOCATION_CODE}" in output
+    assert "Store this code offline" in output
+    assert "R followed by five digits" in output
+    assert output.index("Steam Guard revocation code") < output.index("Steam activation code from email or SMS")
     assert "Steam activation code from email or SMS" in output
     assert "SMS activation code" not in output
     assert SHARED_SECRET not in output

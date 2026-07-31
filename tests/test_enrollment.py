@@ -7,9 +7,10 @@ from steamguard_pc.enrollment import (
     ADD_AUTHENTICATOR_URL,
     FINALIZE_AUTHENTICATOR_URL,
     QUERY_TIME_URL,
+    SEND_EMAIL_URL,
     AuthenticatorAlreadyPresentError,
     EnrollmentClient,
-    PhoneNumberRequiredError,
+    EnrollmentError,
 )
 
 
@@ -50,12 +51,14 @@ def test_add_authenticator_returns_imported_guard(requests_mock):
     assert form["authenticator_time"] == "1700000000"
     assert form["authenticator_type"] == "1"
     assert form["device_identifier"] == DEVICE_ID
+    assert form["version"] == "2"
+    assert "sms_phone_id" not in form
 
 
 @pytest.mark.parametrize(
     ("status", "exc"),
     [
-        (2, PhoneNumberRequiredError),
+        (2, EnrollmentError),
         (29, AuthenticatorAlreadyPresentError),
     ],
 )
@@ -78,4 +81,18 @@ def test_finalize_authenticator_sends_totp_and_activation_code(requests_mock):
     assert form["authenticator_code"] == steam_totp(SHARED_SECRET, 1700000000)
     assert form["authenticator_time"] == "1700000000"
     assert form["activation_code"] == "12345"
-    assert form["validate_sms_code"] == "1"
+    assert "validate_sms_code" not in form
+
+
+def test_send_activation_email_requests_activation_code(requests_mock):
+    requests_mock.post(SEND_EMAIL_URL, json={"response": {"success": True}})
+
+    EnrollmentClient().send_activation_email("access-token", STEAMID64)
+
+    request = requests_mock.request_history[-1]
+    assert request.qs["access_token"] == ["access-token"]
+    form = request_form(request)
+    assert form["steamid"] == STEAMID64
+    assert form["include_activation_code"] == "1"
+
+
