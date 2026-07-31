@@ -206,6 +206,27 @@ def test_parse_and_store_authenticator_metadata(keyring_store):
         assert forbidden not in config_text
 
 
+def test_delete_account_removes_metadata_and_all_secrets(keyring_store):
+    storage.upsert_account(
+        storage.AccountMetadata(
+            steamid64=STEAMID64,
+            account_name="fixture",
+            device_id="android:fixture",
+            last_imported_at="2026-07-31T00:00:00Z",
+        )
+    )
+    for field in storage.SECRET_FIELDS:
+        storage.put_secret(STEAMID64, field, f"secret-{field}")
+
+    deleted = storage.delete_account(STEAMID64)
+
+    assert deleted.account_name == "fixture"
+    assert STEAMID64 not in storage.load_accounts()
+    assert json.loads(storage.config_path().read_text(encoding="utf-8"))["accounts"] == []
+    for field in storage.SECRET_FIELDS:
+        assert storage.get_secret(STEAMID64, field) is None
+
+
 def test_null_keyring_backend_is_rejected(monkeypatch):
     null_backend_type = type("Keyring", (), {"__module__": "keyring.backends.null"})
     monkeypatch.setattr(storage.keyring, "get_keyring", lambda: null_backend_type())

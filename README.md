@@ -36,7 +36,8 @@ Runtime dependencies: `keyring>=25`, `cryptography>=45`, `requests>=2.32`.
 | `setup` | Guided first run: enroll, login-only, or `.maFile` import. |
 | `enroll [ACCOUNT_NAME]` | Add and finalize a Steam mobile authenticator. |
 | `login [ACCOUNT_NAME]` | Sign in or refresh Steam Community session cookies. |
-| `import-mafile PATH` | Import a decrypted Steam Desktop Authenticator `.maFile`. |
+| `accounts [--delete STEAMID64]` | List stored account metadata, or delete one stored account after exact typed consent. |
+| `import-mafile PATH` | Import a Steam Desktop Authenticator `.maFile`; encrypted SDA files prompt for the SDA passkey. |
 | `export-backup PATH [STEAMID64 ...] [--include-revocation-code]` | Write an encrypted SteamGuardPC backup after exact typed consent. |
 | `import-backup PATH` | Import an encrypted SteamGuardPC backup after exact typed consent. |
 | `code STEAMID64` | Print the current 5-character Steam Guard code. |
@@ -55,6 +56,7 @@ Runtime dependencies: `keyring>=25`, `cryptography>=45`, `requests>=2.32`.
 | Add authenticator | `ADD AUTHENTICATOR <steamid64>` |
 | Request activation email | `SEND ACTIVATION EMAIL <steamid64>` |
 | Show revocation code | `SHOW REVOCATION CODE <steamid64>` |
+| Delete stored account | `DELETE ACCOUNT <steamid64>` |
 | Create recovery codes | `CREATE RECOVERY CODES <steamid64>` |
 | Approve confirmation | `APPROVE <confirmation_id>` |
 | Cancel confirmation | `CANCEL <confirmation_id>` |

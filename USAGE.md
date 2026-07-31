@@ -16,7 +16,7 @@ Setup offers:
 
 1. Add a new authenticator.
 2. Sign in only, to refresh Steam Community cookies.
-3. Import a decrypted `.maFile`.
+3. Import an existing `.maFile` (encrypted SDA files supported).
 
 After setup:
 
@@ -24,6 +24,19 @@ After setup:
 .\.venv\Scripts\steamguard-pc accounts
 .\.venv\Scripts\steamguard-pc code <steamid64>
 .\.venv\Scripts\steamguard-pc confirmations <steamid64>
+```
+
+### List or delete stored accounts
+
+```powershell
+.\.venv\Scripts\steamguard-pc accounts
+.\.venv\Scripts\steamguard-pc accounts --delete <steamid64>
+```
+
+Deletion removes local SteamGuardPC metadata and all stored secrets for that account. It does not remove the authenticator from Steam. It requires:
+
+```text
+DELETE ACCOUNT <steamid64>
 ```
 
 ## Workflows
@@ -56,19 +69,13 @@ SEND ACTIVATION EMAIL <steamid64>
 
 Use this when confirmations report session/authentication errors. If the account's `shared_secret` is stored, the required mobile code is generated without printing it.
 
-### Import a decrypted `.maFile`
+### Import a `.maFile`
 
 ```powershell
 .\.venv\Scripts\steamguard-pc import-mafile C:\path\to\account.maFile
 ```
 
-Imports `steamid`, `shared_secret`, `identity_secret`, optional `revocation_code`, and metadata. Secret values are not printed.
-
-Encrypted files are rejected with:
-
-```text
-encrypted or unsupported .maFile; decrypt it in the source app and retry
-```
+Imports `steamid`, `shared_secret`, `identity_secret`, optional `revocation_code`, and metadata. Secret values are not printed. Encrypted Steam Desktop Authenticator files prompt for the SDA passkey and require the sibling `manifest.json` containing that file's salt and IV.
 
 Find candidates:
 
@@ -180,10 +187,10 @@ Remove-Item Env:STEAMGUARDPC_SESSIONID
 | `setup [--mafile PATH] [--skip-cookies]` | Guided first run. |
 | `enroll [ACCOUNT_NAME]` | Add and finalize a mobile authenticator. |
 | `login [ACCOUNT_NAME]` | Refresh Steam Community session credentials. |
-| `accounts` | List stored account metadata. |
+| `accounts [--delete STEAMID64]` | List stored account metadata, or delete one local account after consent. |
 | `revocation-code STEAMID64` | Reveal the stored `R#####` code after consent. |
 | `recovery-codes STEAMID64` | Create one-time recovery codes after consent. |
-| `import-mafile PATH` | Import a decrypted `.maFile`. |
+| `import-mafile PATH` | Import a `.maFile`; encrypted SDA files prompt for the SDA passkey. |
 | `export-backup PATH [STEAMID64 ...] [--force] [--include-revocation-code]` | Write an encrypted SteamGuardPC backup. |
 | `import-backup PATH [--replace]` | Import an encrypted SteamGuardPC backup. |
 | `find-mafiles [DIR ...]` | Find `.maFile` files. |

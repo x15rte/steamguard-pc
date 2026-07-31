@@ -57,6 +57,9 @@ Common workflows:
   steamguard-pc setup
       Guided first run.
 
+  steamguard-pc accounts --delete STEAMID64
+      Delete one local account and its stored secrets after typed consent.
+
   steamguard-pc code STEAMID64
       Print a 5-character login code and seconds remaining.
 
@@ -469,7 +472,30 @@ def _cmd_enroll(args: argparse.Namespace) -> int:
     _enroll_with_prompts(args.account_name)
     return 0
 
+def _delete_account_with_consent(steamid64: str) -> int:
+    with operation_lock.account_operation_lock(steamid64):
+        metadata = storage.load_accounts().get(steamid64)
+        if metadata is None:
+            raise KeyError(f"missing account metadata for {steamid64}")
+
+        label = _account_label(metadata)
+        print(f"Delete stored account {label}?")
+        print("This removes local SteamGuardPC metadata and all stored secrets for this account.")
+        print("This does not remove the authenticator from Steam.")
+        expected = f"DELETE ACCOUNT {steamid64}"
+        if input(f"Type {expected!r} to delete this account: ") != expected:
+            print("Account deletion cancelled.")
+            return 1
+
+        deleted = storage.delete_account(steamid64)
+        print(f"Deleted account {_account_label(deleted)}.")
+        return 0
+
+
 def _cmd_accounts(args: argparse.Namespace) -> int:
+    if args.delete:
+        return _delete_account_with_consent(args.delete)
+
     accounts = storage.load_accounts()
     if not accounts:
         print("No accounts imported.")
@@ -979,9 +1005,10 @@ def _build_parser() -> argparse.ArgumentParser:
     accounts = subparsers.add_parser(
         "accounts",
         help="List stored accounts.",
-        description="List stored account metadata.",
+        description="List stored account metadata, or delete one stored account after exact typed consent.",
         formatter_class=_HelpFormatter,
     )
+    accounts.add_argument("--delete", metavar="STEAMID64", help="Delete this stored account and all stored secrets after exact typed consent.")
     accounts.set_defaults(func=_cmd_accounts)
 
     find_mafiles = subparsers.add_parser(

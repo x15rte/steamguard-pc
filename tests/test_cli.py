@@ -266,6 +266,35 @@ def _seed_cli_backup_account():
     return metadata
 
 
+def test_accounts_delete_requires_exact_phrase_without_removing(monkeypatch, keyring_store, capsys):
+    _seed_cli_backup_account()
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["accounts", "--delete", STEAMID64]) == 1
+
+    output = capsys.readouterr().out
+    assert f"Delete stored account fixture ({STEAMID64})?" in output
+    assert "Account deletion cancelled." in output
+    assert STEAMID64 in cli.storage.load_accounts()
+    assert cli.storage.get_secret(STEAMID64, "shared_secret") == SHARED_SECRET
+
+
+def test_accounts_delete_removes_account_without_printing_secrets(monkeypatch, keyring_store, capsys):
+    _seed_cli_backup_account()
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"DELETE ACCOUNT {STEAMID64}\n"))
+
+    assert cli.main(["accounts", "--delete", STEAMID64]) == 0
+
+    output = capsys.readouterr().out
+    assert f"Deleted account fixture ({STEAMID64})." in output
+    assert STEAMID64 not in cli.storage.load_accounts()
+    assert cli.storage.get_secret(STEAMID64, "shared_secret") is None
+    assert cli.storage.get_secret(STEAMID64, "identity_secret") is None
+    assert cli.storage.get_secret(STEAMID64, "revocation_code") is None
+    for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE]:
+        assert secret not in output
+
+
 def test_export_backup_requires_exact_phrase(monkeypatch, tmp_path, keyring_store, capsys):
     _seed_cli_backup_account()
 

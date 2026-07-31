@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import keyring
-from keyring.errors import KeyringError
+from keyring.errors import KeyringError, PasswordDeleteError
 
 from .models import AccountMetadata, ImportedSteamGuard
 
@@ -82,6 +82,8 @@ def delete_secret(steamid64: str, field: str) -> None:
     ensure_secret_storage_available()
     try:
         keyring.delete_password(SERVICE, secret_name(steamid64, field))
+    except PasswordDeleteError:
+        pass
     except KeyringError as exc:
         raise SecretStorageUnavailable("Windows secret storage is unavailable") from exc
 
@@ -133,6 +135,18 @@ def upsert_account(metadata: AccountMetadata) -> None:
     accounts = load_accounts()
     accounts[metadata.steamid64] = metadata
     save_accounts(accounts)
+
+
+def delete_account(steamid64: str) -> AccountMetadata:
+    accounts = load_accounts()
+    metadata = accounts.pop(steamid64, None)
+    if metadata is None:
+        raise KeyError(f"missing account metadata for {steamid64}")
+
+    for field in SECRET_FIELDS:
+        delete_secret(steamid64, field)
+    save_accounts(accounts)
+    return metadata
 
 
 def store_imported_guard(imported: ImportedSteamGuard) -> AccountMetadata:
