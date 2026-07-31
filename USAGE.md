@@ -6,13 +6,6 @@ Install from [README.md](README.md). Examples assume:
 .\.venv\Scripts\steamguard-pc <command>
 ```
 
-## Safety
-
-- Secrets are stored in keyring-backed secret storage.
-- `enroll`, `approve`, `cancel`, and `revocation-code` require exact typed consent.
-- The Steam Guard `R#####` revocation code can remove the authenticator.
-- Keep Windows time synchronized.
-
 ## First run
 
 ```powershell
