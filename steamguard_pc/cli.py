@@ -68,10 +68,7 @@ Common workflows:
   steamguard-pc revocation-code STEAMID64
       Reveal the stored R##### code after typed consent.
 
-Safety: keep secrets private, back up the R##### code offline, and keep Windows time synchronized.
-
 Run `steamguard-pc COMMAND -h` for command-specific options.
-Full usage guide: USAGE.md
 """
 
 
