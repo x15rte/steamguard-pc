@@ -9,6 +9,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "keyring>=25",
+  "cryptography>=45",
   "requests>=2.32",
 ]
 

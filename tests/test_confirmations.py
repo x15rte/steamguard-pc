@@ -1,3 +1,4 @@
+from urllib.parse import parse_qs
 import pytest
 import requests
 from steamguard_pc import steam_time
@@ -6,6 +7,7 @@ from steamguard_pc.confirmations import (
     AJAXOP_URL,
     BASE_URL,
     GETLIST_URL,
+    MULTIAJAXOP_URL,
     Confirmation,
     ConfirmationFormatError,
     ConfirmationRejectedError,
@@ -13,10 +15,13 @@ from steamguard_pc.confirmations import (
     InvalidConfirmationKeyError,
     NeedAuthenticationError,
     confirmation_params,
+    confirmation_from_api,
     get_confirmations,
     get_confirmation_details_html,
     respond_to_confirmation,
     respond_to_confirmation_id,
+    respond_to_confirmation_ids,
+    respond_to_confirmations,
     trade_offer_id_from_details_html,
 )
 
@@ -208,6 +213,66 @@ def test_cancel_uses_cancel_operation_and_key_tag(requests_mock):
     assert query["tag"] == ["cancel"]
     assert query["cid"] == ["1"]
     assert query["ck"] == ["nonce-1"]
+
+def test_respond_to_confirmations_posts_multiajaxop_arrays(requests_mock):
+    requests_mock.post(MULTIAJAXOP_URL, json={"success": True})
+    selected = [confirmation_from_api(ITEM_ONE), confirmation_from_api(ITEM_TWO)]
+
+    assert respond_to_confirmations(
+        requests.Session(),
+        STEAMID64,
+        DEVICE_ID,
+        IDENTITY_SECRET,
+        selected,
+        True,
+        timestamp=1700000000,
+    ) is True
+
+    request = requests_mock.last_request
+    assert request.method == "POST"
+    form = parse_qs(request.text)
+    assert form["cid"] == ["1", "2"]
+    assert form["ck"] == ["nonce-1", "nonce-2"]
+    assert form["op"] == ["allow"]
+    assert form["tag"] == ["allow"]
+    assert form["m"] == ["react"]
+
+
+def test_respond_to_confirmation_ids_refreshes_before_and_after_batch_success(requests_mock):
+    requests_mock.get(
+        GETLIST_URL,
+        [
+            {"json": {"success": True, "conf": [ITEM_ONE, ITEM_TWO]}},
+            {"json": {"success": True, "conf": []}},
+        ],
+    )
+    requests_mock.post(MULTIAJAXOP_URL, json={"success": True})
+
+    acted = respond_to_confirmation_ids(
+        requests.Session(),
+        STEAMID64,
+        DEVICE_ID,
+        IDENTITY_SECRET,
+        ["1", "2"],
+        True,
+    )
+
+    assert [item.id for item in acted] == ["1", "2"]
+    assert [request.method for request in requests_mock.request_history] == ["GET", "POST", "GET"]
+
+
+def test_respond_to_confirmation_ids_rejects_duplicate_ids(requests_mock):
+    with pytest.raises(ValueError, match="^duplicate confirmation id: 1$"):
+        respond_to_confirmation_ids(
+            requests.Session(),
+            STEAMID64,
+            DEVICE_ID,
+            IDENTITY_SECRET,
+            ["1", "1"],
+            True,
+        )
+
+    assert [request.method for request in requests_mock.request_history] == []
 
 
 

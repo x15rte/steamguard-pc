@@ -6,7 +6,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import auth, confirmations, enrollment, mafile, operation_lock, session, steam_time, storage
+from . import auth, backup, confirmations, enrollment, mafile, operation_lock, session, steam_time, storage
 from .auth import GuardAction, LoginResult, SteamAuthError
 from .confirmations import Confirmation, ConfirmationError
 from .crypto import generate_device_id, seconds_remaining, steam_totp
@@ -18,6 +18,7 @@ from .storage import SecretStorageUnavailable
 EXPECTED_ERRORS = (
     ValueError,
     KeyError,
+    backup.BackupError,
     SecretStorageUnavailable,
     SessionExpiredError,
     ConfirmationError,
@@ -66,11 +67,21 @@ Common workflows:
   steamguard-pc cancel  STEAMID64 CONFIRMATION_ID
       Review one confirmation, type APPROVE/CANCEL <id>, then submit.
 
+  steamguard-pc approve-all STEAMID64
+  steamguard-pc cancel-all  STEAMID64
+      Review every pending confirmation, type APPROVE/CANCEL ALL <count> CONFIRMATIONS <SteamID64>, then submit.
+
   steamguard-pc revocation-code STEAMID64
       Reveal the stored R##### code after typed consent.
 
   steamguard-pc recovery-codes STEAMID64
       Create one-time recovery codes after typed consent.
+
+  steamguard-pc export-backup PATH [STEAMID64 ...]
+      Write an encrypted SteamGuardPC backup after typed consent.
+
+  steamguard-pc import-backup PATH
+      Import an encrypted SteamGuardPC backup after typed consent.
 
 Run `steamguard-pc COMMAND -h` for command-specific options.
 """
@@ -136,6 +147,26 @@ def _print_trade_offer_id(
         trade_offer_id = None
     print(f"trade_offer_id: {trade_offer_id or 'unavailable'}")
 
+def _print_batch_confirmation_review(
+    metadata: storage.AccountMetadata,
+    community_session: object,
+    identity_secret: str,
+    confirmations_to_review: list[Confirmation],
+) -> None:
+    account_label = _account_label(metadata)
+    count = len(confirmations_to_review)
+    print(f"Pending confirmations for {account_label}: {count}")
+    for index, confirmation in enumerate(confirmations_to_review, start=1):
+        print(f"--- confirmation {index} of {count} ---")
+        _print_confirmation_detail(confirmation, account_label)
+        _print_trade_offer_id(
+            community_session,
+            metadata.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+            confirmation.id,
+        )
+
 
 def _exception_text(exc: BaseException) -> str:
     if isinstance(exc, KeyError) and exc.args:
@@ -151,6 +182,20 @@ def _account_metadata(steamid64: str) -> storage.AccountMetadata:
         raise KeyError(f"missing device_id for {steamid64}")
     return metadata
 
+def _selected_backup_ids(steamid64s: list[str]) -> list[str]:
+    accounts = storage.load_accounts()
+    if steamid64s:
+        for steamid64 in steamid64s:
+            if steamid64 not in accounts:
+                raise KeyError(f"missing account metadata for {steamid64}")
+        selected_ids = list(steamid64s)
+    else:
+        selected_ids = sorted(accounts)
+
+    if not selected_ids:
+        raise ValueError("no accounts selected for backup")
+    return selected_ids
+
 
 def _confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str, object]:
     metadata = _account_metadata(steamid64)
@@ -159,7 +204,9 @@ def _confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str,
     return metadata, identity_secret, community_session
 
 
-def _find_current_confirmation(steamid64: str, confirmation_id: str) -> tuple[storage.AccountMetadata, str, object, Confirmation]:
+def _load_current_confirmations(
+    steamid64: str,
+) -> tuple[storage.AccountMetadata, str, object, list[Confirmation]]:
     metadata, identity_secret, community_session = _confirmation_context(steamid64)
     try:
         current = confirmations.get_confirmations(
@@ -176,6 +223,11 @@ def _find_current_confirmation(steamid64: str, confirmation_id: str) -> tuple[st
             metadata.device_id or "",
             identity_secret,
         )
+    return metadata, identity_secret, community_session, current
+
+
+def _find_current_confirmation(steamid64: str, confirmation_id: str) -> tuple[storage.AccountMetadata, str, object, Confirmation]:
+    metadata, identity_secret, community_session, current = _load_current_confirmations(steamid64)
     target = next((item for item in current if item.id == confirmation_id), None)
     if target is None:
         raise confirmations.ConfirmationNotFoundError(f"confirmation {confirmation_id} not found")
@@ -412,6 +464,48 @@ def _cmd_import_mafile(args: argparse.Namespace) -> int:
     _import_mafile_path(args.path)
     return 0
 
+def _cmd_export_backup(args: argparse.Namespace) -> int:
+    selected_ids = _selected_backup_ids(args.steamid64)
+    for warning in backup.unsafe_backup_path_warnings(args.path):
+        print(f"Warning: {warning}")
+    print(f"This encrypted backup will contain Steam Guard secrets and session tokens for {len(selected_ids)} account(s).")
+    print("Store the backup and passphrase separately. SteamGuardPC cannot recover a lost backup passphrase.")
+    expected = f"EXPORT BACKUP {len(selected_ids)} ACCOUNTS"
+    if input(f"Type {expected!r} to write encrypted backup: ") != expected:
+        print("Backup export cancelled.")
+        return 1
+
+    passphrase = getpass.getpass("Backup passphrase: ")
+    repeated = getpass.getpass("Repeat backup passphrase: ")
+    if not passphrase or not repeated:
+        raise ValueError("backup passphrase is required")
+    if passphrase != repeated:
+        raise ValueError("backup passphrases do not match")
+
+    count = backup.export_accounts(args.path, passphrase, selected_ids, overwrite=args.force)
+    print(f"Wrote encrypted backup for {count} account(s) to {args.path}.")
+    return 0
+
+
+def _cmd_import_backup(args: argparse.Namespace) -> int:
+    for warning in backup.unsafe_backup_path_warnings(args.path):
+        print(f"Warning: {warning}")
+    print("This will import Steam Guard secrets from an encrypted SteamGuardPC backup.")
+    if args.replace:
+        print("Existing matching accounts will be overwritten with values from the backup.")
+    else:
+        print("Existing accounts are refused unless --replace is used.")
+    if input("Type 'IMPORT BACKUP' to import encrypted backup: ") != "IMPORT BACKUP":
+        print("Backup import cancelled.")
+        return 1
+
+    passphrase = getpass.getpass("Backup passphrase: ")
+    if not passphrase:
+        raise ValueError("backup passphrase is required")
+    count = backup.import_accounts(args.path, passphrase, replace=args.replace)
+    print(f"Imported encrypted backup for {count} account(s).")
+    return 0
+
 
 def _cmd_set_cookies(args: argparse.Namespace) -> int:
     steam_login_secure = os.environ.get("STEAMGUARDPC_STEAM_LOGIN_SECURE")
@@ -493,22 +587,7 @@ def _cmd_code(args: argparse.Namespace) -> int:
 
 
 def _cmd_confirmations(args: argparse.Namespace) -> int:
-    metadata, identity_secret, community_session = _confirmation_context(args.steamid64)
-    try:
-        current = confirmations.get_confirmations(
-            community_session,
-            args.steamid64,
-            metadata.device_id or "",
-            identity_secret,
-        )
-    except confirmations.NeedAuthenticationError:
-        community_session = session.refresh_community_session(args.steamid64)
-        current = confirmations.get_confirmations(
-            community_session,
-            args.steamid64,
-            metadata.device_id or "",
-            identity_secret,
-        )
+    _, _, _, current = _load_current_confirmations(args.steamid64)
     if not current:
         print("No pending confirmations.")
         return 0
@@ -645,6 +724,54 @@ def _cmd_cancel(args: argparse.Namespace) -> int:
         print(f"Cancelled {args.confirmation_id}.")
         return 0
 
+def _cmd_batch_confirm(args: argparse.Namespace, accept: bool) -> int:
+    with operation_lock.account_operation_lock(args.steamid64):
+        metadata, identity_secret, community_session, current = _load_current_confirmations(args.steamid64)
+        if not current:
+            print("No pending confirmations.")
+            return 0
+
+        _print_batch_confirmation_review(metadata, community_session, identity_secret, current)
+        action = "APPROVE" if accept else "CANCEL"
+        noun = "approval" if accept else "cancellation"
+        expected = f"{action} ALL {len(current)} CONFIRMATIONS {args.steamid64}"
+        if input(f"Type {expected!r} to {'approve' if accept else 'cancel'} all listed confirmations: ") != expected:
+            print(f"Batch {noun} cancelled.")
+            return 1
+
+        confirmation_ids = [item.id for item in current]
+        try:
+            acted = confirmations.respond_to_confirmation_ids(
+                community_session,
+                args.steamid64,
+                metadata.device_id or "",
+                identity_secret,
+                confirmation_ids,
+                accept=accept,
+            )
+        except confirmations.NeedAuthenticationError:
+            community_session = session.refresh_community_session(args.steamid64)
+            acted = confirmations.respond_to_confirmation_ids(
+                community_session,
+                args.steamid64,
+                metadata.device_id or "",
+                identity_secret,
+                confirmation_ids,
+                accept=accept,
+            )
+
+        verb = "Approved" if accept else "Cancelled"
+        print(f"{verb} {len(acted)} confirmations.")
+        return 0
+
+
+def _cmd_approve_all(args: argparse.Namespace) -> int:
+    return _cmd_batch_confirm(args, accept=True)
+
+
+def _cmd_cancel_all(args: argparse.Namespace) -> int:
+    return _cmd_batch_confirm(args, accept=False)
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -698,6 +825,27 @@ def _build_parser() -> argparse.ArgumentParser:
     import_mafile.add_argument("path", metavar="PATH", help="Path to a decrypted .maFile JSON export.")
     import_mafile.set_defaults(func=_cmd_import_mafile)
 
+    export_backup = subparsers.add_parser(
+        "export-backup",
+        help="Write an encrypted SteamGuardPC backup.",
+        description="Write an encrypted backup of stored Steam Guard accounts after typed consent.",
+        formatter_class=_HelpFormatter,
+    )
+    export_backup.add_argument("path", metavar="PATH", help="Destination .sgbak path.")
+    export_backup.add_argument("steamid64", nargs="*", metavar="STEAMID64", help="Optional account IDs to export; defaults to all accounts.")
+    export_backup.add_argument("--force", action="store_true", help="Overwrite an existing backup file.")
+    export_backup.set_defaults(func=_cmd_export_backup)
+
+    import_backup = subparsers.add_parser(
+        "import-backup",
+        help="Import an encrypted SteamGuardPC backup.",
+        description="Import an encrypted SteamGuardPC backup after typed consent.",
+        formatter_class=_HelpFormatter,
+    )
+    import_backup.add_argument("path", metavar="PATH", help="Encrypted .sgbak path.")
+    import_backup.add_argument("--replace", action="store_true", help="Overwrite accounts already stored locally.")
+    import_backup.set_defaults(func=_cmd_import_backup)
+
     code = subparsers.add_parser(
         "code",
         help="Print the current login code.",
@@ -737,6 +885,24 @@ def _build_parser() -> argparse.ArgumentParser:
     cancel.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
     cancel.add_argument("confirmation_id", metavar="CONFIRMATION_ID", help="Confirmation id from `confirmations` output.")
     cancel.set_defaults(func=_cmd_cancel)
+
+    approve_all = subparsers.add_parser(
+        "approve-all",
+        help="Approve all pending confirmations after review.",
+        description="Review every pending confirmation and approve the displayed batch after typed consent.",
+        formatter_class=_HelpFormatter,
+    )
+    approve_all.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
+    approve_all.set_defaults(func=_cmd_approve_all)
+
+    cancel_all = subparsers.add_parser(
+        "cancel-all",
+        help="Cancel all pending confirmations after review.",
+        description="Review every pending confirmation and cancel the displayed batch after typed consent.",
+        formatter_class=_HelpFormatter,
+    )
+    cancel_all.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
+    cancel_all.set_defaults(func=_cmd_cancel_all)
 
     revocation_code = subparsers.add_parser(
         "revocation-code",

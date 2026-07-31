@@ -77,6 +77,17 @@ Find candidates:
 .\.venv\Scripts\steamguard-pc find-mafiles C:\Users\you\Documents D:\Backups
 ```
 
+### Export or import an encrypted backup
+
+```powershell
+.\.venv\Scripts\steamguard-pc export-backup C:\path\to\steamguard.sgbak [<steamid64> ...]
+.\.venv\Scripts\steamguard-pc import-backup C:\path\to\steamguard.sgbak
+```
+
+Export requires `EXPORT BACKUP <count> ACCOUNTS` and a backup passphrase typed twice. Import requires `IMPORT BACKUP` and the same passphrase. Backups contain authenticator secrets and session cookies, encrypted with a KeePassXC-style Argon2id + AES-256-CBC + HMAC-SHA512 profile; store the file and passphrase separately. Passphrases must be at least 16 characters.
+
+Use `--force` to overwrite an existing backup file. Use `--replace` to overwrite matching local accounts during import.
+
 ### Generate a login code
 
 ```powershell
@@ -98,6 +109,8 @@ Clock must be synchronized with Steam; sync Windows time if Steam rejects this c
 .\.venv\Scripts\steamguard-pc confirmations <steamid64>
 .\.venv\Scripts\steamguard-pc approve <steamid64> <confirmation_id>
 .\.venv\Scripts\steamguard-pc cancel <steamid64> <confirmation_id>
+.\.venv\Scripts\steamguard-pc approve-all <steamid64>
+.\.venv\Scripts\steamguard-pc cancel-all <steamid64>
 ```
 
 Rows are tab-separated:
@@ -106,14 +119,16 @@ Rows are tab-separated:
 id    type_name-or-type    creator_id-or--    headline-or--    summary-or--
 ```
 
-Before acting, SteamGuardPC prints the selected confirmation and requires one exact phrase:
+Before acting, SteamGuardPC prints the selected confirmation or every confirmation in the displayed batch, then requires one exact phrase:
 
 ```text
 APPROVE <confirmation_id>
 CANCEL <confirmation_id>
+APPROVE ALL <count> CONFIRMATIONS <steamid64>
+CANCEL ALL <count> CONFIRMATIONS <steamid64>
 ```
 
-Success is reported after Steam accepts the action and the refreshed list no longer contains the target.
+Single-confirmation success is reported after Steam accepts the action and the refreshed list no longer contains the target. Batch commands act only on the reviewed list shown before the consent prompt.
 
 ### Revocation code
 
@@ -169,11 +184,15 @@ Remove-Item Env:STEAMGUARDPC_SESSIONID
 | `revocation-code STEAMID64` | Reveal the stored `R#####` code after consent. |
 | `recovery-codes STEAMID64` | Create one-time recovery codes after consent. |
 | `import-mafile PATH` | Import a decrypted `.maFile`. |
+| `export-backup PATH [STEAMID64 ...] [--force]` | Write an encrypted SteamGuardPC backup. |
+| `import-backup PATH [--replace]` | Import an encrypted SteamGuardPC backup. |
 | `find-mafiles [DIR ...]` | Find `.maFile` files. |
 | `code STEAMID64 [--timestamp UNIX_TIME]` | Print a login code. |
 | `confirmations STEAMID64` | List pending confirmations. |
 | `approve STEAMID64 CONFIRMATION_ID` | Approve one confirmation. |
 | `cancel STEAMID64 CONFIRMATION_ID` | Cancel one confirmation. |
+| `approve-all STEAMID64` | Review and approve every displayed confirmation. |
+| `cancel-all STEAMID64` | Review and cancel every displayed confirmation. |
 | `cookie-guide` | Show manual cookie instructions. |
 | `set-cookies STEAMID64` | Store Community cookies manually. |
 

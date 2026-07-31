@@ -183,6 +183,93 @@ def test_import_mafile_does_not_print_secret_values(monkeypatch, tmp_path, capsy
         assert secret not in printed
 
 
+def _seed_cli_backup_account():
+    metadata = AccountMetadata(
+        steamid64=STEAMID64,
+        account_name="fixture",
+        device_id="android:fixture",
+        last_imported_at="2026-07-31T00:00:00Z",
+    )
+    cli.storage.upsert_account(metadata)
+    cli.storage.put_secret(STEAMID64, "shared_secret", SHARED_SECRET)
+    cli.storage.put_secret(STEAMID64, "identity_secret", IDENTITY_SECRET)
+    cli.storage.put_secret(STEAMID64, "revocation_code", REVOCATION_CODE)
+    return metadata
+
+
+def test_export_backup_requires_exact_phrase(monkeypatch, tmp_path, keyring_store, capsys):
+    _seed_cli_backup_account()
+
+    def export_accounts(*args, **kwargs):
+        raise AssertionError("export should not run")
+
+    monkeypatch.setattr(cli.backup, "export_accounts", export_accounts)
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["export-backup", str(tmp_path / "steamguard.sgbak")]) == 1
+
+    output = capsys.readouterr().out
+    assert "Backup export cancelled." in output
+    for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE]:
+        assert secret not in output
+
+
+def test_export_backup_writes_encrypted_file_without_printing_secrets(monkeypatch, tmp_path, keyring_store, capsys):
+    _seed_cli_backup_account()
+    path = tmp_path / "steamguard.sgbak"
+    passphrase = "correct horse battery staple"
+    monkeypatch.setattr(cli.backup, "KDF_MEMORY_COST", 8 * cli.backup.KDF_LANES)
+    monkeypatch.setattr(cli.backup, "KDF_ITERATIONS", 1)
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: passphrase)
+    monkeypatch.setattr("sys.stdin", io.StringIO("EXPORT BACKUP 1 ACCOUNTS\n"))
+
+    assert cli.main(["export-backup", str(path)]) == 0
+
+    raw_text = path.read_text(encoding="utf-8")
+    output = capsys.readouterr().out
+    assert path.exists()
+    assert "Wrote encrypted backup for 1 account(s)" in output
+    for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE]:
+        assert secret not in raw_text
+        assert secret not in output
+    assert passphrase not in output
+
+
+def test_import_backup_restores_from_cli(monkeypatch, tmp_path, keyring_store, capsys):
+    metadata = _seed_cli_backup_account()
+    path = tmp_path / "steamguard.sgbak"
+    passphrase = "correct horse battery staple"
+    monkeypatch.setattr(cli.backup, "KDF_MEMORY_COST", 8 * cli.backup.KDF_LANES)
+    monkeypatch.setattr(cli.backup, "KDF_ITERATIONS", 1)
+    cli.backup.export_accounts(path, passphrase)
+    keyring_store.clear()
+    cli.storage.save_accounts({})
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: passphrase)
+    monkeypatch.setattr("sys.stdin", io.StringIO("IMPORT BACKUP\n"))
+
+    assert cli.main(["import-backup", str(path)]) == 0
+
+    output = capsys.readouterr().out
+    assert "Imported encrypted backup for 1 account(s)." in output
+    assert cli.storage.load_accounts()[STEAMID64] == metadata
+    assert cli.storage.get_secret(STEAMID64, "shared_secret") == SHARED_SECRET
+    assert cli.storage.get_secret(STEAMID64, "identity_secret") == IDENTITY_SECRET
+    assert cli.storage.get_secret(STEAMID64, "revocation_code") == REVOCATION_CODE
+    for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE, passphrase]:
+        assert secret not in output
+
+
+def test_import_backup_refuses_wrong_phrase(monkeypatch, tmp_path, capsys):
+    def import_accounts(*args, **kwargs):
+        raise AssertionError("import should not run")
+
+    monkeypatch.setattr(cli.backup, "import_accounts", import_accounts)
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["import-backup", str(tmp_path / "steamguard.sgbak")]) == 1
+
+    assert "Backup import cancelled." in capsys.readouterr().out
+
 def test_cookie_guide_prints_browser_cookie_steps(capsys):
     assert cli.main(["cookie-guide"]) == 0
 
@@ -414,6 +501,123 @@ def _patch_confirmation_context(monkeypatch, calls):
 
     monkeypatch.setattr(cli.confirmations, "respond_to_confirmation_id", respond_to_confirmation_id)
 
+
+def _patch_batch_confirmation_context(monkeypatch, calls, current=None):
+    confirmations = current if current is not None else [
+        Confirmation(
+            id="abc",
+            nonce="nonce-abc",
+            creator_id="creator-abc",
+            type_name="Trade",
+            headline="Trade offer",
+            summary="First summary",
+        ),
+        Confirmation(
+            id="def",
+            nonce="nonce-def",
+            creator_id="creator-def",
+            type_name="Market listing",
+            headline="Market sale",
+            summary="Second summary",
+        ),
+    ]
+    monkeypatch.setattr(
+        cli.storage,
+        "load_accounts",
+        lambda: {
+            STEAMID64: AccountMetadata(
+                steamid64=STEAMID64,
+                account_name="fixture",
+                device_id="android:fixture",
+            )
+        },
+    )
+    monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: "identity-secret")
+    monkeypatch.setattr(cli.session, "get_community_session", lambda steamid64: "community-session")
+    monkeypatch.setattr(cli.confirmations, "get_confirmations", lambda *args, **kwargs: list(confirmations))
+    monkeypatch.setattr(
+        cli.confirmations,
+        "get_confirmation_details_html",
+        lambda *args, **kwargs: '<div id="tradeoffer_123456"></div>',
+    )
+
+    @contextmanager
+    def account_operation_lock(steamid64):
+        yield
+
+    monkeypatch.setattr(cli.operation_lock, "account_operation_lock", account_operation_lock)
+
+    def respond_to_confirmation_ids(community_session, steamid64, device_id, identity_secret, confirmation_ids, *, accept):
+        calls.append(
+            {
+                "community_session": community_session,
+                "steamid64": steamid64,
+                "device_id": device_id,
+                "identity_secret": identity_secret,
+                "ids": list(confirmation_ids),
+                "accept": accept,
+            }
+        )
+        return [item for item in confirmations if item.id in confirmation_ids]
+
+    monkeypatch.setattr(cli.confirmations, "respond_to_confirmation_ids", respond_to_confirmation_ids)
+    return confirmations
+
+
+def test_approve_all_requires_exact_phrase_without_action(monkeypatch, capsys):
+    calls = []
+    _patch_batch_confirmation_context(monkeypatch, calls)
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["approve-all", STEAMID64]) == 1
+
+    output = capsys.readouterr().out
+    assert calls == []
+    assert f"Pending confirmations for fixture ({STEAMID64}): 2" in output
+    assert "abc" in output
+    assert "def" in output
+    assert "Batch approval cancelled." in output
+
+
+def test_approve_all_reviews_and_submits_displayed_ids(monkeypatch, capsys):
+    calls = []
+    _patch_batch_confirmation_context(monkeypatch, calls)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"APPROVE ALL 2 CONFIRMATIONS {STEAMID64}\n"))
+
+    assert cli.main(["approve-all", STEAMID64]) == 0
+
+    output = capsys.readouterr().out
+    assert calls[0]["ids"] == ["abc", "def"]
+    assert calls[0]["accept"] is True
+    assert "--- confirmation 1 of 2 ---" in output
+    assert "--- confirmation 2 of 2 ---" in output
+    assert "trade_offer_id: 123456" in output
+    assert "Approved 2 confirmations." in output
+
+
+def test_cancel_all_reviews_and_submits_displayed_ids(monkeypatch, capsys):
+    calls = []
+    _patch_batch_confirmation_context(monkeypatch, calls)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"CANCEL ALL 2 CONFIRMATIONS {STEAMID64}\n"))
+
+    assert cli.main(["cancel-all", STEAMID64]) == 0
+
+    output = capsys.readouterr().out
+    assert calls[0]["ids"] == ["abc", "def"]
+    assert calls[0]["accept"] is False
+    assert "--- confirmation 1 of 2 ---" in output
+    assert "--- confirmation 2 of 2 ---" in output
+    assert "Cancelled 2 confirmations." in output
+
+
+def test_approve_all_no_pending_confirmations(monkeypatch, capsys):
+    calls = []
+    _patch_batch_confirmation_context(monkeypatch, calls, current=[])
+
+    assert cli.main(["approve-all", STEAMID64]) == 0
+
+    assert capsys.readouterr().out == "No pending confirmations.\n"
+    assert calls == []
 
 def test_confirmations_refreshes_session_once_on_needauth(monkeypatch, capsys):
     target = Confirmation(
