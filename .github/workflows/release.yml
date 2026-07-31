@@ -1,0 +1,111 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create, e.g. v0.1.0. Must match pyproject.toml version."
+        required: true
+        type: string
+      title:
+        description: "Release title. Defaults to the tag."
+        required: false
+        type: string
+      draft:
+        description: "Create the release as a draft."
+        required: true
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark the release as a prerelease."
+        required: true
+        type: boolean
+        default: false
+      generate_notes:
+        description: "Generate release notes from GitHub commits and pull requests."
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish GitHub release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install build twine
+
+      - name: Validate tag matches package version
+        shell: bash
+        run: |
+          version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
+          tag="${{ inputs.tag }}"
+          if [[ "$tag" != "v$version" ]]; then
+            echo "::error::Release tag '$tag' must match pyproject.toml version '$version' as 'v$version'."
+            exit 1
+          fi
+
+      - name: Run test suite
+        run: python -m pytest
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Check distributions
+        run: python -m twine check dist/*
+
+      - name: Upload distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions-${{ inputs.tag }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TITLE: ${{ inputs.title }}
+          RELEASE_DRAFT: ${{ inputs.draft }}
+          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_GENERATE_NOTES: ${{ inputs.generate_notes }}
+        shell: bash
+        run: |
+          title="$RELEASE_TITLE"
+          if [[ -z "$title" ]]; then
+            title="$RELEASE_TAG"
+          fi
+
+          flags=(--target "$GITHUB_SHA" --title "$title")
+          if [[ "$RELEASE_DRAFT" == "true" ]]; then
+            flags+=(--draft)
+          fi
+          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+            flags+=(--prerelease)
+          fi
+          if [[ "$RELEASE_GENERATE_NOTES" == "true" ]]; then
+            flags+=(--generate-notes)
+          else
+            flags+=(--notes "Release $RELEASE_TAG")
+          fi
+
+          gh release create "$RELEASE_TAG" dist/* "${flags[@]}"
