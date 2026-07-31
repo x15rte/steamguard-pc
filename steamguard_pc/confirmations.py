@@ -29,6 +29,7 @@ CANCEL_ATTEMPTS = (
 )
 DETAILS_ATTEMPTS = (
     ("detailspage/{confirmation_id}", "details", "react", {"user-agent": "okhttp/4.9.2"}),
+    ("detailspage/{confirmation_id}", "detail", "react", {"user-agent": "okhttp/4.9.2"}),
     ("details/{confirmation_id}", "details{confirmation_id}", "android", MOBILE_HEADERS),
 )
 INCORRECT_CODES_MESSAGE = "incorrect Steam Guard codes"
@@ -231,6 +232,7 @@ def _request_details_html(
     params: Mapping[str, str | int],
     headers: Mapping[str, str],
 ) -> str:
+
     response = _request_get(session, url, params, headers)
     content_type = response.headers.get("content-type", "")
     text = response.text or ""

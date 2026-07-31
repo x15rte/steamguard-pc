@@ -12,6 +12,7 @@ STEAM_API_BASE = "https://api.steampowered.com"
 ADD_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/AddAuthenticator/v1/"
 FINALIZE_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/FinalizeAddAuthenticator/v1/"
 SEND_EMAIL_URL = f"{STEAM_API_BASE}/ITwoFactorService/SendEmail/v1/"
+CREATE_EMERGENCY_CODES_URL = f"{STEAM_API_BASE}/ITwoFactorService/CreateEmergencyCodes/v1/"
 REQUEST_TIMEOUT = 30
 AUTHENTICATOR_TYPE_MOBILE_APP = "1"
 ADD_AUTHENTICATOR_VERSION = "2"
@@ -140,6 +141,24 @@ class EnrollmentClient:
                 "include_activation_code": "1",
             },
         )
+
+    def create_emergency_codes(self, access_token: str, code: str | None = None) -> list[str] | None:
+        data = {} if code is None else {"code": code}
+        payload = self._post(
+            CREATE_EMERGENCY_CODES_URL,
+            params={"access_token": access_token},
+            data=data,
+        )
+        response = payload.get("response", payload)
+        if not isinstance(response, dict):
+            raise EnrollmentError("Steam emergency-code response is malformed")
+
+        codes = response.get("codes") or response.get("emergency_codes")
+        if codes is None and code is None:
+            return None
+        if not isinstance(codes, list) or not all(isinstance(item, str) and item for item in codes):
+            raise EnrollmentError("Steam emergency-code response is missing codes")
+        return codes
 
     def _post(
         self,

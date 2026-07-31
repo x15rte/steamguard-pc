@@ -127,6 +127,20 @@ Requires:
 SHOW REVOCATION CODE <steamid64>
 ```
 
+### Recovery codes
+
+```powershell
+.\.venv\Scripts\steamguard-pc recovery-codes <steamid64>
+```
+
+Requires:
+
+```text
+CREATE RECOVERY CODES <steamid64>
+```
+
+Steam may ask for an email/SMS confirmation code. SteamGuardPC prints the generated one-time codes once and does not save them.
+
 ### Manual cookie setup
 
 ```powershell
@@ -153,6 +167,7 @@ Remove-Item Env:STEAMGUARDPC_SESSIONID
 | `login [ACCOUNT_NAME]` | Refresh Steam Community session credentials. |
 | `accounts` | List stored account metadata. |
 | `revocation-code STEAMID64` | Reveal the stored `R#####` code after consent. |
+| `recovery-codes STEAMID64` | Create one-time recovery codes after consent. |
 | `import-mafile PATH` | Import a decrypted `.maFile`. |
 | `find-mafiles [DIR ...]` | Find `.maFile` files. |
 | `code STEAMID64 [--timestamp UNIX_TIME]` | Print a login code. |

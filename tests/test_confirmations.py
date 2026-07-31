@@ -230,6 +230,30 @@ def test_confirmation_details_extracts_trade_offer_id(requests_mock):
     assert requests_mock.last_request.qs["tag"] == ["details"]
     assert requests_mock.last_request.qs["m"] == ["react"]
 
+
+def test_confirmation_details_falls_back_to_detail_tag(requests_mock):
+    details_url = f"{BASE_URL}/mobileconf/detailspage/1"
+    html = '<div id="tradeoffer_123456"></div>'
+    requests_mock.get(
+        details_url,
+        [
+            {"json": {"success": False, "message": "incorrect Steam Guard codes"}},
+            {"json": {"html": html}},
+        ],
+    )
+
+    returned_html = get_confirmation_details_html(
+        requests.Session(),
+        STEAMID64,
+        DEVICE_ID,
+        IDENTITY_SECRET,
+        "1",
+        timestamp=1700000000,
+    )
+
+    assert returned_html == html
+    assert [request.qs["tag"][0] for request in requests_mock.request_history] == ["details", "detail"]
+    assert [request.qs["m"][0] for request in requests_mock.request_history] == ["react", "react"]
 def test_respond_to_confirmation_id_refreshes_before_and_after_success(requests_mock):
     requests_mock.get(
         GETLIST_URL,

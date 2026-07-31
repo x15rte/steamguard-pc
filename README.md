@@ -42,6 +42,7 @@ Runtime dependencies: `keyring>=25`, `requests>=2.32`.
 | `approve STEAMID64 ID` | Approve one confirmation after exact typed consent. |
 | `cancel STEAMID64 ID` | Cancel one confirmation after exact typed consent. |
 | `revocation-code STEAMID64` | Reveal the stored `R#####` revocation code after exact typed consent. |
+| `recovery-codes STEAMID64` | Create one-time Steam recovery codes after exact typed consent. |
 
 ## Consent phrases
 
@@ -50,6 +51,7 @@ Runtime dependencies: `keyring>=25`, `requests>=2.32`.
 | Add authenticator | `ADD AUTHENTICATOR <steamid64>` |
 | Request activation email | `SEND ACTIVATION EMAIL <steamid64>` |
 | Show revocation code | `SHOW REVOCATION CODE <steamid64>` |
+| Create recovery codes | `CREATE RECOVERY CODES <steamid64>` |
 | Approve confirmation | `APPROVE <confirmation_id>` |
 | Cancel confirmation | `CANCEL <confirmation_id>` |
 

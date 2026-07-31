@@ -7,6 +7,7 @@ from steamguard_pc.crypto import steam_totp
 from steamguard_pc.enrollment import (
     ADD_AUTHENTICATOR_URL,
     FINALIZE_AUTHENTICATOR_URL,
+    CREATE_EMERGENCY_CODES_URL,
     SEND_EMAIL_URL,
     AuthenticatorAlreadyPresentError,
     EnrollmentClient,
@@ -102,3 +103,29 @@ def test_send_activation_email_requests_activation_code(requests_mock):
     assert form["include_activation_code"] == "1"
 
 
+
+def test_create_emergency_codes_requests_confirmation_code(requests_mock):
+    requests_mock.post(CREATE_EMERGENCY_CODES_URL, json={"response": {"status": 1}})
+
+    assert EnrollmentClient().create_emergency_codes("access-token") is None
+
+    request = requests_mock.request_history[-1]
+    assert request.qs["access_token"] == ["access-token"]
+    assert "code" not in request_form(request)
+
+
+def test_create_emergency_codes_returns_codes(requests_mock):
+    requests_mock.post(CREATE_EMERGENCY_CODES_URL, json={"response": {"codes": ["12345678", "87654321"]}})
+
+    codes = EnrollmentClient().create_emergency_codes("access-token", code="13579")
+
+    assert codes == ["12345678", "87654321"]
+    request = requests_mock.request_history[-1]
+    assert request_form(request)["code"] == "13579"
+
+
+def test_create_emergency_codes_rejects_missing_codes(requests_mock):
+    requests_mock.post(CREATE_EMERGENCY_CODES_URL, json={"response": {}})
+
+    with pytest.raises(EnrollmentError, match="^Steam emergency-code response is missing codes$"):
+        EnrollmentClient().create_emergency_codes("access-token", code="13579")

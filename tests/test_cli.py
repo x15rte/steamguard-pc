@@ -1,5 +1,6 @@
 import io
 import json
+from contextlib import contextmanager
 
 import pytest
 
@@ -74,6 +75,68 @@ def test_revocation_code_prints_after_exact_phrase(monkeypatch, keyring_store, c
     assert "R followed by five digits" in output
     assert f"Steam Guard revocation code for fixture ({STEAMID64}): {REVOCATION_CODE}" in output
 
+
+def test_recovery_codes_requires_exact_phrase(monkeypatch, keyring_store, capsys):
+    cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture"))
+
+    def refresh_auth_tokens(steamid64):
+        raise AssertionError("unexpected token refresh")
+
+    class FailingEnrollmentClient:
+        def __init__(self):
+            raise AssertionError("unexpected enrollment client")
+
+    monkeypatch.setattr(cli.session, "refresh_auth_tokens", refresh_auth_tokens)
+    monkeypatch.setattr(cli.enrollment, "EnrollmentClient", FailingEnrollmentClient)
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["recovery-codes", STEAMID64]) == 1
+
+    output = capsys.readouterr().out
+    assert "Recovery-code creation cancelled." in output
+    assert "WRONG" not in output
+    assert "12345678" not in output
+
+
+def test_recovery_codes_requests_confirmation_and_prints_codes(monkeypatch, keyring_store, capsys):
+    cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture"))
+    refresh_calls = []
+
+    def refresh_auth_tokens(steamid64):
+        refresh_calls.append(steamid64)
+        return "access-token", "refresh-token"
+
+    class FakeEnrollmentClient:
+        instances = []
+
+        def __init__(self):
+            self.calls = []
+            self.instances.append(self)
+
+        def create_emergency_codes(self, access_token, code=None):
+            self.calls.append((access_token, code))
+            assert access_token == "access-token"
+            if code is None:
+                return None
+            assert code == "13579"
+            return ["12345678", "87654321"]
+
+    monkeypatch.setattr(cli.session, "refresh_auth_tokens", refresh_auth_tokens)
+    monkeypatch.setattr(cli.enrollment, "EnrollmentClient", FakeEnrollmentClient)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"CREATE RECOVERY CODES {STEAMID64}\n13579\n"))
+
+    assert cli.main(["recovery-codes", STEAMID64]) == 0
+
+    output = capsys.readouterr().out
+    assert "Steam recovery codes are one-time login codes for official Steam recovery prompts." in output
+    assert "Creating a new set may replace older emergency codes. Store the new set offline immediately." in output
+    assert f"Steam recovery codes for fixture ({STEAMID64}):" in output
+    assert "12345678" in output
+    assert "87654321" in output
+    assert "They are not saved by SteamGuardPC." in output
+    assert "13579" not in output
+    assert refresh_calls == [STEAMID64]
+    assert FakeEnrollmentClient.instances[0].calls == [("access-token", None), ("access-token", "13579")]
 
 def test_import_mafile_does_not_print_secret_values(monkeypatch, tmp_path, capsys):
     mafile_path = tmp_path / "account.maFile"
@@ -339,6 +402,12 @@ def _patch_confirmation_context(monkeypatch, calls):
         lambda *args, **kwargs: '<div id="tradeoffer_123456"></div>',
     )
 
+    @contextmanager
+    def account_operation_lock(steamid64):
+        yield
+
+    monkeypatch.setattr(cli.operation_lock, "account_operation_lock", account_operation_lock)
+
     def respond_to_confirmation_id(*args, **kwargs):
         calls.append((args, kwargs))
         return target
@@ -399,9 +468,29 @@ def test_approve_refuses_wrong_confirmation_phrase_without_action(monkeypatch, c
 
     assert cli.main(["approve", STEAMID64, "abc"]) == 1
 
+    output = capsys.readouterr().out
     assert calls == []
-    assert "Approval cancelled." in capsys.readouterr().out
+    assert f"account: fixture ({STEAMID64})" in output
+    assert "Approval cancelled." in output
 
+
+def test_approve_reports_account_lock(monkeypatch, capsys):
+    calls = []
+    _patch_confirmation_context(monkeypatch, calls)
+    message = f"another SteamGuardPC operation is already running for {STEAMID64}"
+
+    @contextmanager
+    def account_operation_lock(steamid64):
+        raise cli.operation_lock.OperationLockError(message)
+        yield
+
+    monkeypatch.setattr(cli.operation_lock, "account_operation_lock", account_operation_lock)
+
+    assert cli.main(["approve", STEAMID64, "abc"]) == 1
+
+    captured = capsys.readouterr()
+    assert calls == []
+    assert message in captured.err
 
 def test_cancel_requires_exact_cancel_phrase(monkeypatch, capsys):
     calls = []
@@ -410,6 +499,8 @@ def test_cancel_requires_exact_cancel_phrase(monkeypatch, capsys):
 
     assert cli.main(["cancel", STEAMID64, "abc"]) == 0
 
+    output = capsys.readouterr().out
     assert len(calls) == 1
     assert calls[0][1]["accept"] is False
-    assert f"Cancelled abc.\n" in capsys.readouterr().out
+    assert f"account: fixture ({STEAMID64})" in output
+    assert f"Cancelled abc.\n" in output

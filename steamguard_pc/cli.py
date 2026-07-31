@@ -6,7 +6,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import auth, confirmations, enrollment, mafile, session, steam_time, storage
+from . import auth, confirmations, enrollment, mafile, operation_lock, session, steam_time, storage
 from .auth import GuardAction, LoginResult, SteamAuthError
 from .confirmations import Confirmation, ConfirmationError
 from .crypto import generate_device_id, seconds_remaining, steam_totp
@@ -23,6 +23,7 @@ EXPECTED_ERRORS = (
     ConfirmationError,
     SteamAuthError,
     EnrollmentError,
+    operation_lock.OperationLockError,
 )
 
 
@@ -68,6 +69,9 @@ Common workflows:
   steamguard-pc revocation-code STEAMID64
       Reveal the stored R##### code after typed consent.
 
+  steamguard-pc recovery-codes STEAMID64
+      Create one-time recovery codes after typed consent.
+
 Run `steamguard-pc COMMAND -h` for command-specific options.
 """
 
@@ -84,6 +88,9 @@ def _confirmation_type(confirmation: Confirmation) -> str:
     value = confirmation.type_name if confirmation.type_name is not None else confirmation.type
     return str(value) if value is not None else "-"
 
+def _account_label(metadata: storage.AccountMetadata) -> str:
+    return f"{metadata.account_name} ({metadata.steamid64})" if metadata.account_name else metadata.steamid64
+
 
 def _print_confirmation_row(confirmation: Confirmation) -> None:
     print(
@@ -99,7 +106,9 @@ def _print_confirmation_row(confirmation: Confirmation) -> None:
     )
 
 
-def _print_confirmation_detail(confirmation: Confirmation) -> None:
+def _print_confirmation_detail(confirmation: Confirmation, account_label: str | None = None) -> None:
+    if account_label is not None:
+        print(f"account: {account_label}")
     print(f"id: {confirmation.id}")
     print(f"type: {_confirmation_type(confirmation)}")
     print(f"creator_id: {confirmation.creator_id or '-'}")
@@ -525,87 +534,116 @@ def _cmd_revocation_code(args: argparse.Namespace) -> int:
     _print_revocation_code(metadata, revocation_code)
     return 0
 
-
-def _cmd_approve(args: argparse.Namespace) -> int:
-    metadata, identity_secret, community_session, target = _find_current_confirmation(
-        args.steamid64,
-        args.confirmation_id,
-    )
-    _print_confirmation_detail(target)
-    _print_trade_offer_id(
-        community_session,
-        args.steamid64,
-        metadata.device_id or "",
-        identity_secret,
-        args.confirmation_id,
-    )
-    expected = f"APPROVE {args.confirmation_id}"
-    if input(f"Type {expected!r} to approve: ") != expected:
-        print("Approval cancelled.")
+def _cmd_recovery_codes(args: argparse.Namespace) -> int:
+    metadata = storage.load_accounts().get(args.steamid64)
+    if metadata is None:
+        raise KeyError(f"missing account metadata for {args.steamid64}")
+    label = _account_label(metadata)
+    print("Steam recovery codes are one-time login codes for official Steam recovery prompts.")
+    print("Creating a new set may replace older emergency codes. Store the new set offline immediately.")
+    expected = f"CREATE RECOVERY CODES {args.steamid64}"
+    if input(f"Type {expected!r} to create recovery codes: ") != expected:
+        print("Recovery-code creation cancelled.")
         return 1
 
-    try:
-        confirmations.respond_to_confirmation_id(
-            community_session,
-            args.steamid64,
-            metadata.device_id or "",
-            identity_secret,
-            args.confirmation_id,
-            accept=True,
-        )
-    except confirmations.NeedAuthenticationError:
-        community_session = session.refresh_community_session(args.steamid64)
-        confirmations.respond_to_confirmation_id(
-            community_session,
-            args.steamid64,
-            metadata.device_id or "",
-            identity_secret,
-            args.confirmation_id,
-            accept=True,
-        )
-    print(f"Approved {args.confirmation_id}.")
+    access_token, _ = session.refresh_auth_tokens(args.steamid64)
+    client = enrollment.EnrollmentClient()
+    codes = client.create_emergency_codes(access_token)
+    if codes is None:
+        confirmation_code = input("Steam recovery-code confirmation code from email or SMS: ").strip()
+        if not confirmation_code:
+            raise ValueError("Steam recovery-code confirmation code is required")
+        codes = client.create_emergency_codes(access_token, confirmation_code)
+
+    print(f"Steam recovery codes for {label}:")
+    for code in codes:
+        print(code)
+    print("Store these one-time codes offline. They are not saved by SteamGuardPC.")
     return 0
+
+
+def _cmd_approve(args: argparse.Namespace) -> int:
+    with operation_lock.account_operation_lock(args.steamid64):
+        metadata, identity_secret, community_session, target = _find_current_confirmation(
+            args.steamid64,
+            args.confirmation_id,
+        )
+        _print_confirmation_detail(target, _account_label(metadata))
+        _print_trade_offer_id(
+            community_session,
+            args.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+            args.confirmation_id,
+        )
+        expected = f"APPROVE {args.confirmation_id}"
+        if input(f"Type {expected!r} to approve: ") != expected:
+            print("Approval cancelled.")
+            return 1
+
+        try:
+            confirmations.respond_to_confirmation_id(
+                community_session,
+                args.steamid64,
+                metadata.device_id or "",
+                identity_secret,
+                args.confirmation_id,
+                accept=True,
+            )
+        except confirmations.NeedAuthenticationError:
+            community_session = session.refresh_community_session(args.steamid64)
+            confirmations.respond_to_confirmation_id(
+                community_session,
+                args.steamid64,
+                metadata.device_id or "",
+                identity_secret,
+                args.confirmation_id,
+                accept=True,
+            )
+        print(f"Approved {args.confirmation_id}.")
+        return 0
 
 
 def _cmd_cancel(args: argparse.Namespace) -> int:
-    metadata, identity_secret, community_session, target = _find_current_confirmation(
-        args.steamid64,
-        args.confirmation_id,
-    )
-    _print_confirmation_detail(target)
-    _print_trade_offer_id(
-        community_session,
-        args.steamid64,
-        metadata.device_id or "",
-        identity_secret,
-        args.confirmation_id,
-    )
-    expected = f"CANCEL {args.confirmation_id}"
-    if input(f"Type {expected!r} to cancel: ") != expected:
-        print("Approval cancelled.")
-        return 1
+    with operation_lock.account_operation_lock(args.steamid64):
+        metadata, identity_secret, community_session, target = _find_current_confirmation(
+            args.steamid64,
+            args.confirmation_id,
+        )
+        _print_confirmation_detail(target, _account_label(metadata))
+        _print_trade_offer_id(
+            community_session,
+            args.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+            args.confirmation_id,
+        )
+        expected = f"CANCEL {args.confirmation_id}"
+        if input(f"Type {expected!r} to cancel: ") != expected:
+            print("Approval cancelled.")
+            return 1
 
-    try:
-        confirmations.respond_to_confirmation_id(
-            community_session,
-            args.steamid64,
-            metadata.device_id or "",
-            identity_secret,
-            args.confirmation_id,
-            accept=False,
-        )
-    except confirmations.NeedAuthenticationError:
-        community_session = session.refresh_community_session(args.steamid64)
-        confirmations.respond_to_confirmation_id(
-            community_session,
-            args.steamid64,
-            metadata.device_id or "",
-            identity_secret,
-            args.confirmation_id,
-            accept=False,
-        )
-    print(f"Cancelled {args.confirmation_id}.")
-    return 0
+        try:
+            confirmations.respond_to_confirmation_id(
+                community_session,
+                args.steamid64,
+                metadata.device_id or "",
+                identity_secret,
+                args.confirmation_id,
+                accept=False,
+            )
+        except confirmations.NeedAuthenticationError:
+            community_session = session.refresh_community_session(args.steamid64)
+            confirmations.respond_to_confirmation_id(
+                community_session,
+                args.steamid64,
+                metadata.device_id or "",
+                identity_secret,
+                args.confirmation_id,
+                accept=False,
+            )
+        print(f"Cancelled {args.confirmation_id}.")
+        return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -708,6 +746,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     revocation_code.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
     revocation_code.set_defaults(func=_cmd_revocation_code)
+
+    recovery_codes = subparsers.add_parser(
+        "recovery-codes",
+        help="Create one-time Steam recovery codes.",
+        description="Create one-time Steam recovery codes after typed consent.",
+        formatter_class=_HelpFormatter,
+    )
+    recovery_codes.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
+    recovery_codes.set_defaults(func=_cmd_recovery_codes)
 
     accounts = subparsers.add_parser(
         "accounts",

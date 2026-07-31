@@ -62,3 +62,18 @@ def test_get_community_session_refreshes_from_refresh_token_when_cookies_missing
     assert cookies[("sessionid", "steamcommunity.com")] == "session-cookie"
     assert cookies[("steamLoginSecure", ".steamcommunity.com")] == "secure-cookie"
     assert cookies[("sessionid", ".steamcommunity.com")] == "session-cookie"
+
+
+def test_refresh_auth_tokens_stores_renewed_tokens(keyring_store):
+    storage.put_secret(STEAMID64, "refresh_token", "refresh-token")
+
+    class FakeAuthClient:
+        def refresh_access_token(self, refresh_token):
+            assert refresh_token == "refresh-token"
+            return "access-token", "new-refresh-token"
+
+    tokens = session_module.refresh_auth_tokens(STEAMID64, FakeAuthClient())
+
+    assert tokens == ("access-token", "new-refresh-token")
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token")] == "access-token"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:refresh_token")] == "new-refresh-token"
