@@ -1,18 +1,4 @@
-<div align="center">
-
 # SteamGuardPC
-
-**Windows CLI for Steam Guard codes, sessions, authenticator enrollment, and confirmations.**
-
-[![Steam Guard helper](https://img.shields.io/badge/Steam%20Guard-helper-1b2838?style=for-the-badge&logo=steam&logoColor=white)](#steamguardpc)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](pyproject.toml)
-[![Windows focused](https://img.shields.io/badge/Windows-focused-0078D4?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0yIDRsOC0xdjhIMlY0em0xMC0xbDEwLTF2OUgxMlYzek0yIDEzaDh2OGwtOC0xdi03em0xMCAwaDEwdjlsLTEwLTF2LTh6Ii8%2BPC9zdmc%2B)](#requirements)
-[![Keyring required](https://img.shields.io/badge/secrets-keyring%20required-2E7D32?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik02IDEwVjhhNiA2IDAgMCAxIDEyIDB2MmgxYTEgMSAwIDAgMSAxIDF2MTBhMSAxIDAgMCAxLTEgMUg1YTEgMSAwIDAgMS0xLTFWMTFhMSAxIDAgMCAxIDEtMWgxem0yIDBoOFY4YTQgNCAwIDAgMC04IDB2MnoiLz48L3N2Zz4%3D)](#storage)
-[![Release workflow](https://img.shields.io/github/actions/workflow/status/x15rte/steamguardPC/release.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=release)](https://github.com/x15rte/steamguardPC/actions/workflows/release.yml)
-
-</div>
-
----
 
 SteamGuardPC stores Steam Guard secrets in Windows secret storage and keeps account-changing actions behind explicit typed consent.
 
