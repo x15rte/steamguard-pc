@@ -1,6 +1,6 @@
 # SteamGuardPC
 
-SteamGuardPC stores Steam Guard secrets in Windows secret storage and keeps account-changing actions behind explicit typed consent.
+Windows CLI for Steam Guard codes, authenticator enrollment, and secure confirmation handling.
 
 ## Quick start
 
