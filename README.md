@@ -1,11 +1,11 @@
 # SteamGuardPC
 
-Windows CLI for Steam Guard codes, authenticator enrollment, and secure confirmation handling.
+Windows Python CLI for Steam Guard codes, authenticator enrollment, and confirmation handling.
 
 ## Quick start
 
 ```powershell
-py -3.11 -m venv .venv
+py -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 .\.venv\Scripts\steamguard-pc setup
 ```
@@ -19,6 +19,15 @@ Then:
 ```
 
 Full command guide: [USAGE.md](USAGE.md).
+
+## Requirements
+
+- Windows-focused.
+- Python `>=3.11`.
+- Working Python `keyring` backend, normally Windows Credential Manager.
+- Steam network access for sign-in, enrollment, confirmations, and session refresh.
+
+Runtime dependencies: `keyring>=25`, `requests>=2.32`.
 
 ## Commands
 
@@ -44,21 +53,18 @@ Full command guide: [USAGE.md](USAGE.md).
 | Approve confirmation | `APPROVE <confirmation_id>` |
 | Cancel confirmation | `CANCEL <confirmation_id>` |
 
-## Requirements
-
-- Windows-focused.
-- Python `>=3.11`.
-- Working Python `keyring` backend, normally Windows Credential Manager.
-- Steam network access for sign-in, enrollment, confirmations, and session refresh.
-
-Runtime dependencies: `keyring>=25`, `requests>=2.32`.
-
 ## Storage
 
 Plain metadata:
 
 ```text
 %APPDATA%\SteamGuardPC\config.json
+```
+
+For isolated metadata:
+
+```powershell
+$env:STEAMGUARDPC_CONFIG_DIR = "C:\path\to\isolated-config"
 ```
 
 Secrets in keyring service `SteamGuardPC`:
@@ -70,29 +76,3 @@ Secrets in keyring service `SteamGuardPC`:
 - `access_token`
 - `steamLoginSecure`
 - `sessionid`
-
-For isolated runs:
-
-```powershell
-$env:STEAMGUARDPC_CONFIG_DIR = "C:\path\to\isolated-config"
-```
-
-## Safety
-
-- Treat Steam passwords, session cookies, generated codes, activation codes, and revocation codes as account credentials.
-- The `R#####` revocation code can remove the authenticator. Store it offline.
-- Keep Windows time synchronized; Steam Guard codes are time based.
-- Keep exported `.maFile` files out of Git, Downloads, and cloud-sync folders.
-- If keyring is unavailable, fix the keyring backend before storing credentials.
-
-## Development
-
-```powershell
-.\.venv\Scripts\python -m pytest
-```
-
-Offline crypto smoke:
-
-```powershell
-.\.venv\Scripts\python -c "from steamguard_pc.crypto import steam_totp, confirmation_key, generate_device_id; s='MDEyMzQ1Njc4OWFiY2RlZmdoaWo='; i='aWRlbnRpdHktc2VjcmV0LTEyMzQ='; assert steam_totp(s,0)=='CX2MR'; assert confirmation_key(i,'conf',1700000000)==(1700000000,'6eXMXFho61EmjoiIvP/WlyItlCU='); assert generate_device_id('76561197960287930')=='android:6d3f10d9-6369-a1ae-97a0-94df28b95192'; print('offline steamguard smoke ok')"
-```
