@@ -45,47 +45,30 @@ class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
 HELP_DESCRIPTION = """\
 SteamGuardPC is a Windows-focused Steam Guard helper.
 
-It stores Steam Guard authenticators, revocation codes, session tokens, and
-Steam Community cookies in keyring-backed secret storage. It can enroll a new
-authenticator, import a decrypted .maFile, generate offline login codes,
-refresh sessions, and approve or cancel one mobile confirmation at a time.
+Stores secrets in keyring and handles login codes, sessions, authenticator
+enrollment, revocation-code display, and one-at-a-time confirmations.
 """
 
 
 HELP_EPILOG = """\
 Common workflows:
   steamguard-pc setup
-      Guided first run. Choose enrollment, login-only, or .maFile import.
-
-  steamguard-pc enroll ACCOUNT_NAME
-      Add a new mobile authenticator. Requires ADD AUTHENTICATOR <steamid64>,
-      stores the new secrets before validation, shows the R##### revocation code
-      when available, then asks for Steam's email/SMS activation code.
-
-  steamguard-pc login ACCOUNT_NAME
-      Sign in or refresh the Steam Community session. If a shared_secret is
-      already stored, the required mobile code is generated without printing it.
+      Guided first run.
 
   steamguard-pc code STEAMID64
-      Print the current 5-character login code and seconds remaining.
+      Print a 5-character login code and seconds remaining.
 
   steamguard-pc confirmations STEAMID64
       List pending mobile confirmations.
 
   steamguard-pc approve STEAMID64 CONFIRMATION_ID
   steamguard-pc cancel  STEAMID64 CONFIRMATION_ID
-      Show the selected confirmation, require APPROVE/CANCEL <id>, then verify
-      the target disappeared after Steam accepts the action.
+      Review one confirmation, type APPROVE/CANCEL <id>, then submit.
 
   steamguard-pc revocation-code STEAMID64
-      Reveal the stored R##### revocation code only after typing
-      SHOW REVOCATION CODE <steamid64>. This code can remove the authenticator.
+      Reveal the stored R##### code after typed consent.
 
-Safety notes:
-  - Secrets are stored via keyring-backed secret storage.
-  - .maFile imports must be decrypted first and should not be kept in Git,
-    Downloads, or cloud-sync folders.
-  - Keep Windows time synchronized; Steam Guard codes are time based.
+Safety: keep secrets private, back up the R##### code offline, and keep Windows time synchronized.
 
 Run `steamguard-pc COMMAND -h` for command-specific options.
 Full usage guide: USAGE.md
@@ -567,25 +550,17 @@ def _build_parser() -> argparse.ArgumentParser:
     setup = subparsers.add_parser(
         "setup",
         help="Guided first-run setup.",
-        description=(
-            "Guided first-run setup. Choose authenticator enrollment, login-only\n"
-            "session refresh, or decrypted .maFile import."
-        ),
+        description="Guided first-run setup.",
         formatter_class=_HelpFormatter,
     )
-    setup.add_argument("--mafile", metavar="PATH", help="Import this decrypted .maFile directly instead of asking setup questions.")
-    setup.add_argument("--skip-cookies", action="store_true", help="After .maFile import, do not prompt to store Steam Community cookies.")
+    setup.add_argument("--mafile", metavar="PATH", help="Import this decrypted .maFile directly.")
+    setup.add_argument("--skip-cookies", action="store_true", help="Skip cookie setup after .maFile import.")
     setup.set_defaults(func=_cmd_setup)
 
     enroll = subparsers.add_parser(
         "enroll",
-        help="Add a mobile authenticator and complete validation.",
-        description=(
-            "Add and finalize a new Steam mobile authenticator.\n"
-            "Requires exact typed consent, stores generated secrets before validation,\n"
-            "shows the R##### revocation code when Steam returns one, then asks for\n"
-            "Steam's email/SMS activation code."
-        ),
+        help="Add and finalize a mobile authenticator.",
+        description="Add and finalize a mobile authenticator after typed consent.",
         formatter_class=_HelpFormatter,
     )
     enroll.add_argument("account_name", nargs="?", metavar="ACCOUNT_NAME", help="Steam account login name. Prompts if omitted.")
@@ -593,12 +568,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     login = subparsers.add_parser(
         "login",
-        help="Sign in or refresh the Steam Community session.",
-        description=(
-            "Sign in to Steam, handle Steam Guard challenges, and store or refresh\n"
-            "session tokens and Steam Community cookies. If a shared_secret is already\n"
-            "stored, the required mobile code is generated without printing it."
-        ),
+        help="Sign in or refresh Community cookies.",
+        description="Sign in and store or refresh Steam Community session credentials.",
         formatter_class=_HelpFormatter,
     )
     login.add_argument("account_name", nargs="?", metavar="ACCOUNT_NAME", help="Steam account login name. Prompts if omitted.")
@@ -606,11 +577,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     import_mafile = subparsers.add_parser(
         "import-mafile",
-        help="Import a decrypted .maFile into secret storage.",
-        description=(
-            "Import a decrypted Steam Desktop Authenticator-compatible .maFile.\n"
-            "Secrets are stored in keyring and are never printed."
-        ),
+        help="Import a decrypted .maFile.",
+        description="Import a decrypted Steam Desktop Authenticator .maFile into secret storage.",
         formatter_class=_HelpFormatter,
     )
     import_mafile.add_argument("path", metavar="PATH", help="Path to a decrypted .maFile JSON export.")
@@ -618,24 +586,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     code = subparsers.add_parser(
         "code",
-        help="Print the current Steam Guard login code.",
-        description=(
-            "Generate the current 5-character Steam Guard login code offline.\n"
-            "Uses the stored shared_secret and prints seconds remaining."
-        ),
+        help="Print the current login code.",
+        description="Print the current 5-character Steam Guard login code.",
         formatter_class=_HelpFormatter,
     )
     code.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
-    code.add_argument("--timestamp", type=int, metavar="UNIX_TIME", help="Use a fixed Unix timestamp for deterministic troubleshooting/tests.")
+    code.add_argument("--timestamp", type=int, metavar="UNIX_TIME", help="Use a fixed Unix timestamp.")
     code.set_defaults(func=_cmd_code)
 
     pending = subparsers.add_parser(
         "confirmations",
-        help="List pending mobile confirmations.",
-        description=(
-            "List pending Steam mobile confirmations.\n"
-            "Uses the stored identity_secret and Steam Community cookies."
-        ),
+        help="List pending confirmations.",
+        description="List pending Steam mobile confirmations.",
         formatter_class=_HelpFormatter,
     )
     pending.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
@@ -643,12 +605,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     approve = subparsers.add_parser(
         "approve",
-        help="Approve one confirmation after exact typed consent.",
-        description=(
-            "Approve exactly one selected confirmation.\n"
-            "Prints target details, requires `APPROVE <confirmation_id>`, and reports\n"
-            "success only after the target disappears from a refreshed list."
-        ),
+        help="Approve one confirmation.",
+        description="Approve one selected confirmation after typed consent.",
         formatter_class=_HelpFormatter,
     )
     approve.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
@@ -657,12 +615,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     cancel = subparsers.add_parser(
         "cancel",
-        help="Cancel one confirmation after exact typed consent.",
-        description=(
-            "Cancel exactly one selected confirmation.\n"
-            "Prints target details, requires `CANCEL <confirmation_id>`, and reports\n"
-            "success only after the target disappears from a refreshed list."
-        ),
+        help="Cancel one confirmation.",
+        description="Cancel one selected confirmation after typed consent.",
         formatter_class=_HelpFormatter,
     )
     cancel.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
@@ -671,12 +625,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     revocation_code = subparsers.add_parser(
         "revocation-code",
-        help="Reveal the stored R##### revocation code after consent.",
-        description=(
-            "Reveal the stored Steam Guard R##### revocation code after exact typed consent.\n"
-            "This code can remove the authenticator and is not Steam's seven-digit\n"
-            "website sign-in recovery code."
-        ),
+        help="Reveal the stored R##### code.",
+        description="Reveal the stored R##### revocation code after typed consent.",
         formatter_class=_HelpFormatter,
     )
     revocation_code.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
@@ -684,45 +634,33 @@ def _build_parser() -> argparse.ArgumentParser:
 
     accounts = subparsers.add_parser(
         "accounts",
-        help="List stored account metadata.",
-        description=(
-            "List Steam accounts known to SteamGuardPC.\n"
-            "Prints metadata only; secrets are never printed."
-        ),
+        help="List stored accounts.",
+        description="List stored account metadata.",
         formatter_class=_HelpFormatter,
     )
     accounts.set_defaults(func=_cmd_accounts)
 
     find_mafiles = subparsers.add_parser(
         "find-mafiles",
-        help="Search for .maFile candidates.",
-        description=(
-            "Search common locations or supplied directories for .maFile files.\n"
-            "Useful before importing an existing authenticator."
-        ),
+        help="Find .maFile files.",
+        description="Search for .maFile files.",
         formatter_class=_HelpFormatter,
     )
-    find_mafiles.add_argument("search_dir", nargs="*", metavar="DIR", help="Directory to search. Defaults to common SDA-style locations.")
+    find_mafiles.add_argument("search_dir", nargs="*", metavar="DIR", help="Directory to search.")
     find_mafiles.set_defaults(func=_cmd_find_mafiles)
 
     cookie_guide = subparsers.add_parser(
         "cookie-guide",
-        help="Show manual cookie-copying steps.",
-        description=(
-            "Print fallback browser instructions for manually copying\n"
-            "steamLoginSecure and sessionid. Prefer `login` when possible."
-        ),
+        help="Show manual cookie steps.",
+        description="Show browser steps for copying Steam Community cookies.",
         formatter_class=_HelpFormatter,
     )
     cookie_guide.set_defaults(func=_cmd_cookie_guide)
 
     set_cookies = subparsers.add_parser(
         "set-cookies",
-        help="Store Steam Community cookies manually.",
-        description=(
-            "Store steamLoginSecure and sessionid for an account.\n"
-            "Manual fallback only; prefer `login` when possible."
-        ),
+        help="Store Community cookies manually.",
+        description="Store steamLoginSecure and sessionid manually.",
         formatter_class=_HelpFormatter,
     )
     set_cookies.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
