@@ -129,6 +129,9 @@ def parse_mafile(raw: dict[str, object]) -> ImportedSteamGuard:
         ),
         sessionid=_optional_str(session_dict.get("SessionID"))
         or _optional_str(session_dict.get("sessionid")),
+        serial_number=_optional_str(raw.get("serial_number")) or _optional_str(raw.get("SerialNumber")),
+        token_gid=_optional_str(raw.get("token_gid")) or _optional_str(raw.get("TokenGID")),
+        uri=_optional_str(raw.get("uri")) or _optional_str(raw.get("URI")),
     )
 
 

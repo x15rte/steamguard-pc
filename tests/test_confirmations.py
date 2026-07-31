@@ -1,8 +1,10 @@
 import pytest
 import requests
+from steamguard_pc import steam_time
 
 from steamguard_pc.confirmations import (
     AJAXOP_URL,
+    BASE_URL,
     GETLIST_URL,
     Confirmation,
     ConfirmationFormatError,
@@ -12,8 +14,10 @@ from steamguard_pc.confirmations import (
     NeedAuthenticationError,
     confirmation_params,
     get_confirmations,
+    get_confirmation_details_html,
     respond_to_confirmation,
     respond_to_confirmation_id,
+    trade_offer_id_from_details_html,
 )
 
 
@@ -107,6 +111,40 @@ def test_get_confirmations_incorrect_codes_raises_invalid_key(requests_mock, res
         get_confirmations(requests.Session(), STEAMID64, DEVICE_ID, IDENTITY_SECRET, 1700000000)
 
 
+def test_get_confirmations_falls_back_to_current_tag_and_react_client(requests_mock):
+    requests_mock.get(
+        GETLIST_URL,
+        [
+            {"json": {"success": False, "message": "incorrect Steam Guard codes"}},
+            {"json": {"success": True, "conf": [ITEM_ONE]}},
+        ],
+    )
+
+    confirmations = get_confirmations(requests.Session(), STEAMID64, DEVICE_ID, IDENTITY_SECRET, 1700000000)
+
+    assert [item.id for item in confirmations] == ["1"]
+    assert [request.qs["tag"][0] for request in requests_mock.request_history] == ["conf", "list"]
+    assert [request.qs["m"][0] for request in requests_mock.request_history] == ["android", "react"]
+
+
+def test_get_confirmations_retries_bad_codes_with_steam_time(monkeypatch, requests_mock):
+    monkeypatch.setattr(steam_time, "query_steam_time", lambda: 1700000030)
+    requests_mock.get(
+        GETLIST_URL,
+        [
+            {"json": {"success": False, "message": "incorrect Steam Guard codes"}},
+            {"json": {"success": False, "message": "incorrect Steam Guard codes"}},
+            {"json": {"success": True, "conf": [ITEM_ONE]}},
+        ],
+    )
+
+    confirmations = get_confirmations(requests.Session(), STEAMID64, DEVICE_ID, IDENTITY_SECRET)
+
+    assert [item.id for item in confirmations] == ["1"]
+    assert [request.qs["tag"][0] for request in requests_mock.request_history] == ["conf", "list", "conf"]
+    assert requests_mock.request_history[-1].qs["t"] == ["1700000030"]
+
+
 def test_approve_uses_allow_operation_and_key_tag(requests_mock):
     requests_mock.get(AJAXOP_URL, json={"success": True})
     confirmation = Confirmation(id="1", nonce="nonce-1")
@@ -125,6 +163,31 @@ def test_approve_uses_allow_operation_and_key_tag(requests_mock):
     assert query["tag"] == ["allow"]
     assert query["cid"] == ["1"]
     assert query["ck"] == ["nonce-1"]
+
+
+def test_respond_to_confirmation_falls_back_to_accept_tag(requests_mock):
+    requests_mock.get(
+        AJAXOP_URL,
+        [
+            {"json": {"success": False, "message": "incorrect Steam Guard codes"}},
+            {"json": {"success": True}},
+        ],
+    )
+    confirmation = Confirmation(id="1", nonce="nonce-1")
+
+    assert respond_to_confirmation(
+        requests.Session(),
+        STEAMID64,
+        DEVICE_ID,
+        IDENTITY_SECRET,
+        confirmation,
+        accept=True,
+        timestamp=1700000000,
+    ) is True
+
+    assert [request.qs["op"][0] for request in requests_mock.request_history] == ["allow", "allow"]
+    assert [request.qs["tag"][0] for request in requests_mock.request_history] == ["allow", "accept"]
+    assert [request.qs["ck"][0] for request in requests_mock.request_history] == ["nonce-1", "nonce-1"]
 
 
 def test_cancel_uses_cancel_operation_and_key_tag(requests_mock):
@@ -146,6 +209,26 @@ def test_cancel_uses_cancel_operation_and_key_tag(requests_mock):
     assert query["cid"] == ["1"]
     assert query["ck"] == ["nonce-1"]
 
+
+
+def test_confirmation_details_extracts_trade_offer_id(requests_mock):
+    details_url = f"{BASE_URL}/mobileconf/detailspage/1"
+    html = '<div id="tradeoffer_123456"></div>'
+    requests_mock.get(details_url, json={"html": html})
+
+    returned_html = get_confirmation_details_html(
+        requests.Session(),
+        STEAMID64,
+        DEVICE_ID,
+        IDENTITY_SECRET,
+        "1",
+        timestamp=1700000000,
+    )
+
+    assert returned_html == html
+    assert trade_offer_id_from_details_html(returned_html) == "123456"
+    assert requests_mock.last_request.qs["tag"] == ["details"]
+    assert requests_mock.last_request.qs["m"] == ["react"]
 
 def test_respond_to_confirmation_id_refreshes_before_and_after_success(requests_mock):
     requests_mock.get(

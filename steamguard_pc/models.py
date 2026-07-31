@@ -22,6 +22,9 @@ class ImportedSteamGuard:
     access_token: str | None = None
     steam_login_secure: str | None = None
     sessionid: str | None = None
+    serial_number: str | None = None
+    token_gid: str | None = None
+    uri: str | None = None
 
 
 @dataclass(frozen=True)

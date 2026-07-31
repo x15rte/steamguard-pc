@@ -20,11 +20,24 @@ SECRET_FIELDS = {
     "access_token",
     "steamLoginSecure",
     "sessionid",
+    "serial_number",
+    "token_gid",
+    "uri",
 }
 
 
 class SecretStorageUnavailable(RuntimeError):
     pass
+
+
+def ensure_secret_storage_available() -> None:
+    try:
+        backend = keyring.get_keyring()
+    except KeyringError as exc:
+        raise SecretStorageUnavailable("Windows secret storage is unavailable") from exc
+    backend_name = f"{backend.__class__.__module__}.{backend.__class__.__name__}"
+    if backend_name == "keyring.backends.null.Keyring":
+        raise SecretStorageUnavailable("Windows secret storage is unavailable; keyring is using the null backend")
 
 
 def config_dir() -> Path:
@@ -50,6 +63,7 @@ def secret_name(steamid64: str, field: str) -> str:
 
 
 def put_secret(steamid64: str, field: str, value: str) -> None:
+    ensure_secret_storage_available()
     try:
         keyring.set_password(SERVICE, secret_name(steamid64, field), value)
     except KeyringError as exc:
@@ -57,6 +71,7 @@ def put_secret(steamid64: str, field: str, value: str) -> None:
 
 
 def get_secret(steamid64: str, field: str) -> str | None:
+    ensure_secret_storage_available()
     try:
         return keyring.get_password(SERVICE, secret_name(steamid64, field))
     except KeyringError as exc:
@@ -64,6 +79,7 @@ def get_secret(steamid64: str, field: str) -> str | None:
 
 
 def delete_secret(steamid64: str, field: str) -> None:
+    ensure_secret_storage_available()
     try:
         keyring.delete_password(SERVICE, secret_name(steamid64, field))
     except KeyringError as exc:
@@ -129,6 +145,9 @@ def store_imported_guard(imported: ImportedSteamGuard) -> AccountMetadata:
         "access_token": imported.access_token,
         "steamLoginSecure": imported.steam_login_secure,
         "sessionid": imported.sessionid,
+        "serial_number": imported.serial_number,
+        "token_gid": imported.token_gid,
+        "uri": imported.uri,
     }
     for field, value in optional_secrets.items():
         if value:

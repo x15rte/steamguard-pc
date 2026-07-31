@@ -6,7 +6,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import auth, confirmations, enrollment, mafile, session, storage
+from . import auth, confirmations, enrollment, mafile, session, steam_time, storage
 from .auth import GuardAction, LoginResult, SteamAuthError
 from .confirmations import Confirmation, ConfirmationError
 from .crypto import generate_device_id, seconds_remaining, steam_totp
@@ -107,6 +107,27 @@ def _print_confirmation_detail(confirmation: Confirmation) -> None:
     print(f"summary: {_summary_text(confirmation.summary)}")
 
 
+def _print_trade_offer_id(
+    community_session: object,
+    steamid64: str,
+    device_id: str,
+    identity_secret: str,
+    confirmation_id: str,
+) -> None:
+    try:
+        html = confirmations.get_confirmation_details_html(
+            community_session,
+            steamid64,
+            device_id,
+            identity_secret,
+            confirmation_id,
+        )
+        trade_offer_id = confirmations.trade_offer_id_from_details_html(html)
+    except (ConfirmationError, steam_time.SteamTimeError):
+        trade_offer_id = None
+    print(f"trade_offer_id: {trade_offer_id or 'unavailable'}")
+
+
 def _exception_text(exc: BaseException) -> str:
     if isinstance(exc, KeyError) and exc.args:
         return str(exc.args[0])
@@ -131,12 +152,21 @@ def _confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str,
 
 def _find_current_confirmation(steamid64: str, confirmation_id: str) -> tuple[storage.AccountMetadata, str, object, Confirmation]:
     metadata, identity_secret, community_session = _confirmation_context(steamid64)
-    current = confirmations.get_confirmations(
-        community_session,
-        steamid64,
-        metadata.device_id or "",
-        identity_secret,
-    )
+    try:
+        current = confirmations.get_confirmations(
+            community_session,
+            steamid64,
+            metadata.device_id or "",
+            identity_secret,
+        )
+    except confirmations.NeedAuthenticationError:
+        community_session = session.refresh_community_session(steamid64)
+        current = confirmations.get_confirmations(
+            community_session,
+            steamid64,
+            metadata.device_id or "",
+            identity_secret,
+        )
     target = next((item for item in current if item.id == confirmation_id), None)
     if target is None:
         raise confirmations.ConfirmationNotFoundError(f"confirmation {confirmation_id} not found")
@@ -440,7 +470,11 @@ def _cmd_setup(args: argparse.Namespace) -> int:
 
 
 def _cmd_code(args: argparse.Namespace) -> int:
-    timestamp = args.timestamp if args.timestamp is not None else int(time.time())
+    if args.timestamp is not None and args.steam_time:
+        raise ValueError("--timestamp and --steam-time cannot be combined")
+    timestamp = steam_time.query_steam_time() if args.steam_time else args.timestamp
+    if timestamp is None:
+        timestamp = int(time.time())
     shared_secret = storage.get_required_secret(args.steamid64, "shared_secret")
     code = steam_totp(shared_secret, timestamp)
     remaining = seconds_remaining(timestamp)
@@ -451,12 +485,21 @@ def _cmd_code(args: argparse.Namespace) -> int:
 
 def _cmd_confirmations(args: argparse.Namespace) -> int:
     metadata, identity_secret, community_session = _confirmation_context(args.steamid64)
-    current = confirmations.get_confirmations(
-        community_session,
-        args.steamid64,
-        metadata.device_id or "",
-        identity_secret,
-    )
+    try:
+        current = confirmations.get_confirmations(
+            community_session,
+            args.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+        )
+    except confirmations.NeedAuthenticationError:
+        community_session = session.refresh_community_session(args.steamid64)
+        current = confirmations.get_confirmations(
+            community_session,
+            args.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+        )
     if not current:
         print("No pending confirmations.")
         return 0
@@ -489,19 +532,37 @@ def _cmd_approve(args: argparse.Namespace) -> int:
         args.confirmation_id,
     )
     _print_confirmation_detail(target)
-    expected = f"APPROVE {args.confirmation_id}"
-    if input(f"Type {expected!r} to approve: ") != expected:
-        print("Approval cancelled.")
-        return 1
-
-    confirmations.respond_to_confirmation_id(
+    _print_trade_offer_id(
         community_session,
         args.steamid64,
         metadata.device_id or "",
         identity_secret,
         args.confirmation_id,
-        accept=True,
     )
+    expected = f"APPROVE {args.confirmation_id}"
+    if input(f"Type {expected!r} to approve: ") != expected:
+        print("Approval cancelled.")
+        return 1
+
+    try:
+        confirmations.respond_to_confirmation_id(
+            community_session,
+            args.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+            args.confirmation_id,
+            accept=True,
+        )
+    except confirmations.NeedAuthenticationError:
+        community_session = session.refresh_community_session(args.steamid64)
+        confirmations.respond_to_confirmation_id(
+            community_session,
+            args.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+            args.confirmation_id,
+            accept=True,
+        )
     print(f"Approved {args.confirmation_id}.")
     return 0
 
@@ -512,19 +573,37 @@ def _cmd_cancel(args: argparse.Namespace) -> int:
         args.confirmation_id,
     )
     _print_confirmation_detail(target)
-    expected = f"CANCEL {args.confirmation_id}"
-    if input(f"Type {expected!r} to cancel: ") != expected:
-        print("Approval cancelled.")
-        return 1
-
-    confirmations.respond_to_confirmation_id(
+    _print_trade_offer_id(
         community_session,
         args.steamid64,
         metadata.device_id or "",
         identity_secret,
         args.confirmation_id,
-        accept=False,
     )
+    expected = f"CANCEL {args.confirmation_id}"
+    if input(f"Type {expected!r} to cancel: ") != expected:
+        print("Approval cancelled.")
+        return 1
+
+    try:
+        confirmations.respond_to_confirmation_id(
+            community_session,
+            args.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+            args.confirmation_id,
+            accept=False,
+        )
+    except confirmations.NeedAuthenticationError:
+        community_session = session.refresh_community_session(args.steamid64)
+        confirmations.respond_to_confirmation_id(
+            community_session,
+            args.steamid64,
+            metadata.device_id or "",
+            identity_secret,
+            args.confirmation_id,
+            accept=False,
+        )
     print(f"Cancelled {args.confirmation_id}.")
     return 0
 
@@ -589,6 +668,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     code.add_argument("steamid64", metavar="STEAMID64", help="SteamID64 for the stored account.")
     code.add_argument("--timestamp", type=int, metavar="UNIX_TIME", help="Use a fixed Unix timestamp.")
+    code.add_argument("--steam-time", action="store_true", help="Use Steam server time instead of local Windows time.")
     code.set_defaults(func=_cmd_code)
 
     pending = subparsers.add_parser(

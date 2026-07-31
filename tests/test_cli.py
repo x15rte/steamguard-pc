@@ -24,6 +24,15 @@ def test_code_timestamp_prints_deterministic_code(monkeypatch, capsys):
     ]
 
 
+def test_code_steam_time_uses_query_time(monkeypatch, capsys):
+    monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: SHARED_SECRET)
+    monkeypatch.setattr(cli.steam_time, "query_steam_time", lambda: 30)
+
+    assert cli.main(["code", STEAMID64, "--steam-time"]) == 0
+
+    assert capsys.readouterr().out.startswith("57G3M expires_in=30s\n")
+
+
 
 def test_top_level_help_is_descriptive(capsys):
     with pytest.raises(SystemExit) as excinfo:
@@ -324,12 +333,63 @@ def _patch_confirmation_context(monkeypatch, calls):
     monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: "identity-secret")
     monkeypatch.setattr(cli.session, "get_community_session", lambda steamid64: object())
     monkeypatch.setattr(cli.confirmations, "get_confirmations", lambda *args, **kwargs: [target])
+    monkeypatch.setattr(
+        cli.confirmations,
+        "get_confirmation_details_html",
+        lambda *args, **kwargs: '<div id="tradeoffer_123456"></div>',
+    )
 
     def respond_to_confirmation_id(*args, **kwargs):
         calls.append((args, kwargs))
         return target
 
     monkeypatch.setattr(cli.confirmations, "respond_to_confirmation_id", respond_to_confirmation_id)
+
+
+def test_confirmations_refreshes_session_once_on_needauth(monkeypatch, capsys):
+    target = Confirmation(
+        id="abc",
+        nonce="nonce",
+        creator_id="creator",
+        type_name="Trade",
+        headline="Trade offer",
+        summary="Summary",
+    )
+    monkeypatch.setattr(
+        cli.storage,
+        "load_accounts",
+        lambda: {
+            STEAMID64: AccountMetadata(
+                steamid64=STEAMID64,
+                account_name="fixture",
+                device_id="android:fixture",
+            )
+        },
+    )
+    monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: IDENTITY_SECRET)
+    monkeypatch.setattr(cli.session, "get_community_session", lambda steamid64: "expired-session")
+    refresh_calls = []
+
+    def refresh_community_session(steamid64):
+        refresh_calls.append(steamid64)
+        return "fresh-session"
+
+    monkeypatch.setattr(cli.session, "refresh_community_session", refresh_community_session)
+    confirmation_sessions = []
+
+    def get_confirmations(community_session, *args, **kwargs):
+        confirmation_sessions.append(community_session)
+        if len(confirmation_sessions) == 1:
+            raise cli.confirmations.NeedAuthenticationError("expired")
+        return [target]
+
+    monkeypatch.setattr(cli.confirmations, "get_confirmations", get_confirmations)
+
+    assert cli.main(["confirmations", STEAMID64]) == 0
+
+    assert refresh_calls == [STEAMID64]
+    assert confirmation_sessions == ["expired-session", "fresh-session"]
+    assert "abc\tTrade\tcreator\tTrade offer\tSummary\n" in capsys.readouterr().out
 
 
 def test_approve_refuses_wrong_confirmation_phrase_without_action(monkeypatch, capsys):

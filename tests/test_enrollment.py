@@ -2,11 +2,11 @@ from urllib.parse import parse_qs
 
 import pytest
 
+from steamguard_pc import steam_time
 from steamguard_pc.crypto import steam_totp
 from steamguard_pc.enrollment import (
     ADD_AUTHENTICATOR_URL,
     FINALIZE_AUTHENTICATOR_URL,
-    QUERY_TIME_URL,
     SEND_EMAIL_URL,
     AuthenticatorAlreadyPresentError,
     EnrollmentClient,
@@ -25,7 +25,7 @@ def request_form(request):
 
 
 def test_add_authenticator_returns_imported_guard(requests_mock):
-    requests_mock.post(QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
+    requests_mock.post(steam_time.QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
     requests_mock.post(
         ADD_AUTHENTICATOR_URL,
         json={
@@ -34,6 +34,9 @@ def test_add_authenticator_returns_imported_guard(requests_mock):
                 "shared_secret": SHARED_SECRET,
                 "identity_secret": IDENTITY_SECRET,
                 "revocation_code": "R12345",
+                "serial_number": "serial-1",
+                "token_gid": "token-gid-1",
+                "uri": "otpauth://totp/steam?secret=fixture",
             }
         },
     )
@@ -46,6 +49,9 @@ def test_add_authenticator_returns_imported_guard(requests_mock):
     assert result.imported.identity_secret == IDENTITY_SECRET
     assert result.imported.revocation_code == "R12345"
     assert result.imported.device_id == DEVICE_ID
+    assert result.imported.serial_number == "serial-1"
+    assert result.imported.token_gid == "token-gid-1"
+    assert result.imported.uri == "otpauth://totp/steam?secret=fixture"
     form = request_form(requests_mock.request_history[-1])
     assert form["steamid"] == STEAMID64
     assert form["authenticator_time"] == "1700000000"
@@ -63,7 +69,7 @@ def test_add_authenticator_returns_imported_guard(requests_mock):
     ],
 )
 def test_add_authenticator_maps_status_failures(requests_mock, status, exc):
-    requests_mock.post(QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
+    requests_mock.post(steam_time.QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
     requests_mock.post(ADD_AUTHENTICATOR_URL, json={"response": {"status": status}})
 
     with pytest.raises(exc):
@@ -71,7 +77,7 @@ def test_add_authenticator_maps_status_failures(requests_mock, status, exc):
 
 
 def test_finalize_authenticator_sends_totp_and_activation_code(requests_mock):
-    requests_mock.post(QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
+    requests_mock.post(steam_time.QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
     requests_mock.post(FINALIZE_AUTHENTICATOR_URL, json={"response": {"success": True, "want_more": False, "status": 1}})
 
     EnrollmentClient().finalize_authenticator("access-token", STEAMID64, SHARED_SECRET, "12345")

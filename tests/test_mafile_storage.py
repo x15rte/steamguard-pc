@@ -110,3 +110,48 @@ def test_store_imported_guard_keeps_secrets_out_of_config(keyring_store):
         "R12345",
     ]:
         assert forbidden not in config_text
+
+
+def test_parse_and_store_authenticator_metadata(keyring_store):
+    imported = parse_mafile(
+        valid_mafile(
+            SerialNumber="serial-1",
+            TokenGID="token-gid-1",
+            uri="otpauth://totp/steam?secret=fixture",
+        )
+    )
+
+    assert imported.serial_number == "serial-1"
+    assert imported.token_gid == "token-gid-1"
+    assert imported.uri == "otpauth://totp/steam?secret=fixture"
+
+    storage.store_imported_guard(imported)
+
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:serial_number")] == "serial-1"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:token_gid")] == "token-gid-1"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:uri")] == "otpauth://totp/steam?secret=fixture"
+    config_text = storage.config_path().read_text(encoding="utf-8")
+    for forbidden in [
+        "serial_number",
+        "token_gid",
+        "uri",
+        "serial-1",
+        "token-gid-1",
+        "otpauth://totp/steam?secret=fixture",
+    ]:
+        assert forbidden not in config_text
+
+
+def test_null_keyring_backend_is_rejected(monkeypatch):
+    null_backend_type = type("Keyring", (), {"__module__": "keyring.backends.null"})
+    monkeypatch.setattr(storage.keyring, "get_keyring", lambda: null_backend_type())
+    message = "Windows secret storage is unavailable; keyring is using the null backend"
+
+    operations = [
+        lambda: storage.put_secret(STEAMID64, "shared_secret", SHARED_SECRET),
+        lambda: storage.get_secret(STEAMID64, "shared_secret"),
+        lambda: storage.delete_secret(STEAMID64, "shared_secret"),
+    ]
+    for operation in operations:
+        with pytest.raises(storage.SecretStorageUnavailable, match=f"^{message}$"):
+            operation()

@@ -3,12 +3,12 @@ from typing import Any
 
 import requests
 
+from . import steam_time
 from .crypto import generate_device_id, steam_totp, validate_base64_secret
 from .models import ImportedSteamGuard
 
 
 STEAM_API_BASE = "https://api.steampowered.com"
-QUERY_TIME_URL = f"{STEAM_API_BASE}/ITwoFactorService/QueryTime/v1/"
 ADD_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/AddAuthenticator/v1/"
 FINALIZE_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/FinalizeAddAuthenticator/v1/"
 SEND_EMAIL_URL = f"{STEAM_API_BASE}/ITwoFactorService/SendEmail/v1/"
@@ -44,12 +44,7 @@ class EnrollmentClient:
         self.http = http or requests.Session()
 
     def query_steam_time(self) -> int:
-        payload = self._post(QUERY_TIME_URL, params=None, data={})
-        response = payload.get("response", payload)
-        server_time = response.get("server_time") if isinstance(response, dict) else None
-        if server_time is None:
-            raise EnrollmentError("Steam time response is missing server_time")
-        return int(server_time)
+        return steam_time.query_steam_time(self.http)
 
     def add_authenticator(
         self,
@@ -93,6 +88,9 @@ class EnrollmentClient:
                 identity_secret=identity_secret,
                 revocation_code=_optional_str(response.get("revocation_code")),
                 device_id=device_id,
+                serial_number=_optional_str(response.get("serial_number")),
+                token_gid=_optional_str(response.get("token_gid")),
+                uri=_optional_str(response.get("uri")),
             ),
             raw=dict(response),
         )

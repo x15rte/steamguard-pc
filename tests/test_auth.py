@@ -1,4 +1,4 @@
-from urllib.parse import quote
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -45,7 +45,7 @@ def test_encrypt_password_returns_base64_ciphertext():
     assert len(base64.b64decode(encrypted)) == 128
 
 
-def test_login_with_credentials_submits_guard_code_and_synthesizes_cookies(monkeypatch):
+def test_login_with_credentials_finalizes_web_login_cookies(monkeypatch):
     client = auth.SteamAuthClient()
     calls = []
 
@@ -73,7 +73,14 @@ def test_login_with_credentials_submits_guard_code_and_synthesizes_cookies(monke
             }
         raise AssertionError(api_method)
 
+    def fake_finalize(refresh_token, steamid64, sessionid=None):
+        assert refresh_token == "refresh-token"
+        assert steamid64 == STEAMID64
+        assert sessionid is None
+        return auth.WebLoginResult(steamid64, "community-secure", "community-session")
+
     monkeypatch.setattr(client, "_api_request", fake_api)
+    monkeypatch.setattr(client, "finalize_web_login", fake_finalize)
 
     result = client.login_with_credentials(
         "fixture",
@@ -87,14 +94,55 @@ def test_login_with_credentials_submits_guard_code_and_synthesizes_cookies(monke
     assert result.account_name == "fixture"
     assert result.refresh_token == "refresh-token"
     assert result.access_token == "access-token"
-    assert result.steam_login_secure == quote(f"{STEAMID64}||access-token", safe="")
-    assert result.sessionid
+    assert result.steam_login_secure == "community-secure"
+    assert result.sessionid == "community-session"
     assert [call[0] for call in calls] == [
         "GetPasswordRSAPublicKey",
         "BeginAuthSessionViaCredentials",
         "UpdateAuthSessionWithSteamGuardCode",
         "PollAuthSessionStatus",
     ]
+
+
+def test_finalize_web_login_posts_nonce_follows_transfers_and_reads_community_cookies(requests_mock):
+    client = auth.SteamAuthClient()
+    transfer_url = "https://steamcommunity.com/login/transfer"
+    requests_mock.post(
+        auth.LOGIN_FINALIZE_URL,
+        json={
+            "steamID": STEAMID64,
+            "transfer_info": [
+                {"url": transfer_url, "params": {"nonce": "transfer-nonce", "auth": "transfer-auth"}}
+            ],
+        },
+    )
+
+    def transfer_callback(request, context):
+        client.http.cookies.set("steamLoginSecure", "community-secure", domain="steamcommunity.com", path="/")
+        client.http.cookies.set("sessionid", "community-session", domain="steamcommunity.com", path="/")
+        client.http.cookies.set("steamRefreshSecure", "refresh-secure", domain="steamcommunity.com", path="/")
+        return "ok"
+
+    requests_mock.post(transfer_url, text=transfer_callback)
+
+    result = client.finalize_web_login("refresh-token", sessionid="generated-session")
+
+    assert result == auth.WebLoginResult(STEAMID64, "community-secure", "community-session", "refresh-secure")
+    assert len(requests_mock.request_history) == 2
+    finalize_request = requests_mock.request_history[0]
+    assert finalize_request.url == auth.LOGIN_FINALIZE_URL
+    assert parse_qs(finalize_request.text) == {
+        "nonce": ["refresh-token"],
+        "sessionid": ["generated-session"],
+        "redir": [auth.COMMUNITY_HOME_REDIRECT],
+    }
+    transfer_request = requests_mock.request_history[1]
+    assert transfer_request.url == transfer_url
+    assert parse_qs(transfer_request.text) == {
+        "nonce": ["transfer-nonce"],
+        "auth": ["transfer-auth"],
+        "steamID": [STEAMID64],
+    }
 
 
 def test_refresh_access_token_uses_refresh_token_subject(monkeypatch):

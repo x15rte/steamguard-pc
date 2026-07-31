@@ -4,7 +4,6 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
 
 import requests
 
@@ -24,6 +23,12 @@ GUARD_DEVICE_CODE = 3
 GUARD_DEVICE_CONFIRMATION = 4
 GUARD_EMAIL_CONFIRMATION = 5
 REQUEST_TIMEOUT = 30
+LOGIN_FINALIZE_URL = "https://login.steampowered.com/jwt/finalizelogin"
+COMMUNITY_HOME_REDIRECT = "https://steamcommunity.com/login/home/?goto="
+COMMUNITY_DOMAIN = "steamcommunity.com"
+STORE_DOMAIN = "store.steampowered.com"
+HELP_DOMAIN = "help.steampowered.com"
+
 
 GUARD_TYPE_NAMES = {
     GUARD_NONE: "none",
@@ -113,6 +118,13 @@ class LoginResult:
     sessionid: str
     steam_guard_machine_token: str | None = None
 
+@dataclass(frozen=True)
+class WebLoginResult:
+    steamid64: str
+    steam_login_secure: str
+    sessionid: str
+    steam_refresh_secure: str | None = None
+
 
 def decode_jwt_payload(token: str) -> dict[str, Any]:
     parts = token.split(".")
@@ -136,12 +148,20 @@ def jwt_subject(token: str) -> str:
     return str(subject)
 
 
-def steam_login_secure_cookie(steamid64: str, access_token: str) -> str:
-    return quote(f"{steamid64}||{access_token}", safe="")
 
 
 def generate_sessionid() -> str:
     return secrets.token_hex(12)
+
+def _cookie_value(cookies: requests.cookies.RequestsCookieJar, name: str, domain: str | None = None) -> str | None:
+    if domain is not None:
+        for cookie in cookies:
+            if cookie.name == name and cookie.domain.lstrip(".") == domain:
+                return cookie.value
+    for cookie in cookies:
+        if cookie.name == name:
+            return cookie.value
+    return None
 
 
 def encrypt_password(publickey_mod_hex: str, publickey_exp_hex: str, password: str) -> str:
@@ -166,6 +186,69 @@ class SteamAuthClient:
     def __init__(self, http: requests.Session | None = None) -> None:
         self.http = http or requests.Session()
 
+
+    def finalize_web_login(
+        self,
+        refresh_token: str,
+        steamid64: str | None = None,
+        sessionid: str | None = None,
+    ) -> WebLoginResult:
+        sessionid = sessionid or generate_sessionid()
+        try:
+            response = self.http.post(
+                LOGIN_FINALIZE_URL,
+                data={"nonce": refresh_token, "sessionid": sessionid, "redir": COMMUNITY_HOME_REDIRECT},
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise SteamAuthTransportError("Steam web-login finalization failed") from exc
+        if response.status_code < 200 or response.status_code >= 300:
+            raise SteamAuthTransportError("Steam web-login finalization failed")
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise SteamAuthResponseError("Steam web-login finalization response is malformed") from exc
+        if not isinstance(payload, dict):
+            raise SteamAuthResponseError("Steam web-login finalization response is malformed")
+
+        if steamid64 is None:
+            steam_id = payload.get("steamID")
+            if not steam_id:
+                raise SteamAuthResponseError("Steam web-login finalization response is missing steamID")
+            steamid64 = str(steam_id)
+
+        for item in payload.get("transfer_info") or []:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            params = item.get("params")
+            if not isinstance(url, str) or not isinstance(params, Mapping):
+                continue
+            transfer_data = dict(params)
+            transfer_data["steamID"] = steamid64
+            try:
+                transfer_response = self.http.post(url, data=transfer_data, timeout=REQUEST_TIMEOUT)
+            except requests.exceptions.RequestException as exc:
+                raise SteamAuthTransportError("Steam web-login finalization failed") from exc
+            if transfer_response.status_code < 200 or transfer_response.status_code >= 300:
+                raise SteamAuthTransportError("Steam web-login finalization failed")
+
+        steam_login_secure = _cookie_value(self.http.cookies, "steamLoginSecure", COMMUNITY_DOMAIN)
+        sessionid_cookie = _cookie_value(self.http.cookies, "sessionid", COMMUNITY_DOMAIN)
+        if not steam_login_secure or not sessionid_cookie:
+            steam_login_secure = steam_login_secure or _cookie_value(self.http.cookies, "steamLoginSecure")
+            sessionid_cookie = sessionid_cookie or _cookie_value(self.http.cookies, "sessionid")
+        if not steam_login_secure or not sessionid_cookie:
+            raise SteamAuthResponseError("Steam web-login finalization did not return Community cookies")
+
+        return WebLoginResult(
+            steamid64=steamid64,
+            steam_login_secure=steam_login_secure,
+            sessionid=sessionid_cookie,
+            steam_refresh_secure=_cookie_value(self.http.cookies, "steamRefreshSecure", COMMUNITY_DOMAIN)
+            or _cookie_value(self.http.cookies, "steamRefreshSecure"),
+        )
     def get_rsa_key(self, account_name: str) -> dict[str, str]:
         request = encode_message([(1, "length", account_name)])
         payload = self._api_request("GetPasswordRSAPublicKey", request, _RSA_RESPONSE, method="GET")
@@ -305,13 +388,14 @@ class SteamAuthClient:
                 if not access_token:
                     access_token, _ = self.refresh_access_token(str(refresh_token))
                 steamid64 = auth_session.steamid64 or jwt_subject(str(refresh_token))
+                web_login = self.finalize_web_login(str(refresh_token), steamid64)
                 return LoginResult(
                     steamid64=steamid64,
                     account_name=str(payload["account_name"]) if payload.get("account_name") else account_name,
                     refresh_token=str(refresh_token),
                     access_token=str(access_token),
-                    steam_login_secure=steam_login_secure_cookie(steamid64, str(access_token)),
-                    sessionid=generate_sessionid(),
+                    steam_login_secure=web_login.steam_login_secure,
+                    sessionid=web_login.sessionid,
                     steam_guard_machine_token=(
                         str(payload["new_guard_data"]) if payload.get("new_guard_data") else None
                     ),
