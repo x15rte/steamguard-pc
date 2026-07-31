@@ -1,0 +1,29 @@
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build metadata
+*.egg-info/
+build/
+dist/
+
+# Local environment and app state
+.env
+.env.*
+config.json
+SteamGuardPC/
+
+# Steam authenticator exports and local backups
+*.maFile
+maFiles/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
