@@ -211,13 +211,14 @@ def _decrypt_aes256_cbc(ciphertext: bytes, key: bytes, iv: bytes) -> bytes:
         raise BackupDecryptionError("backup passphrase is incorrect or backup file is corrupted") from exc
 
 
-def _account_to_backup(metadata: AccountMetadata) -> dict[str, object]:
+def _account_to_backup(metadata: AccountMetadata, include_revocation_code: bool = False) -> dict[str, object]:
     secrets: dict[str, str] = {}
     for field in storage.SECRET_FIELDS:
+        if field == "revocation_code" and not include_revocation_code:
+            continue
         value = storage.get_secret(metadata.steamid64, field)
         if value is not None:
             secrets[field] = value
-
     return {
         "steamid64": metadata.steamid64,
         "account_name": metadata.account_name,
@@ -241,6 +242,7 @@ def export_accounts(
     passphrase: str,
     steamid64s: Sequence[str] | None = None,
     overwrite: bool = False,
+    include_revocation_code: bool = False,
 ) -> int:
     _validate_passphrase(passphrase)
 
@@ -257,7 +259,7 @@ def export_accounts(
         metadata = metadata_by_id.get(steamid64)
         if metadata is None:
             raise KeyError(f"missing account metadata for {steamid64}")
-        selected_accounts.append(_account_to_backup(metadata))
+        selected_accounts.append(_account_to_backup(metadata, include_revocation_code=include_revocation_code))
 
     if not selected_accounts:
         raise ValueError("no accounts selected for backup")

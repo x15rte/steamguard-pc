@@ -235,6 +235,45 @@ def test_export_backup_writes_encrypted_file_without_printing_secrets(monkeypatc
     assert passphrase not in output
 
 
+def test_export_backup_include_revocation_code_requires_extra_phrase(monkeypatch, tmp_path, keyring_store, capsys):
+    _seed_cli_backup_account()
+
+    def export_accounts(*args, **kwargs):
+        raise AssertionError("export should not run")
+
+    monkeypatch.setattr(cli.backup, "export_accounts", export_accounts)
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["export-backup", str(tmp_path / "steamguard.sgbak"), "--include-revocation-code"]) == 1
+
+    output = capsys.readouterr().out
+    assert "Warning: this backup will include Steam Guard revocation codes." in output
+    assert "Backup export cancelled." in output
+    assert REVOCATION_CODE not in output
+
+
+def test_export_backup_include_revocation_code_passes_opt_in(monkeypatch, tmp_path, keyring_store, capsys):
+    _seed_cli_backup_account()
+    path = tmp_path / "steamguard.sgbak"
+    passphrase = "correct horse battery staple"
+    calls = []
+
+    def export_accounts(*args, **kwargs):
+        calls.append((args, kwargs))
+        return 1
+
+    monkeypatch.setattr(cli.backup, "export_accounts", export_accounts)
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: passphrase)
+    monkeypatch.setattr("sys.stdin", io.StringIO("INCLUDE REVOCATION CODES 1 ACCOUNTS\nEXPORT BACKUP 1 ACCOUNTS\n"))
+
+    assert cli.main(["export-backup", str(path), "--include-revocation-code"]) == 0
+
+    output = capsys.readouterr().out
+    assert calls[0][1]["include_revocation_code"] is True
+    assert "Wrote encrypted backup for 1 account(s)" in output
+    assert REVOCATION_CODE not in output
+
+
 def test_import_backup_restores_from_cli(monkeypatch, tmp_path, keyring_store, capsys):
     metadata = _seed_cli_backup_account()
     path = tmp_path / "steamguard.sgbak"
@@ -254,7 +293,7 @@ def test_import_backup_restores_from_cli(monkeypatch, tmp_path, keyring_store, c
     assert cli.storage.load_accounts()[STEAMID64] == metadata
     assert cli.storage.get_secret(STEAMID64, "shared_secret") == SHARED_SECRET
     assert cli.storage.get_secret(STEAMID64, "identity_secret") == IDENTITY_SECRET
-    assert cli.storage.get_secret(STEAMID64, "revocation_code") == REVOCATION_CODE
+    assert cli.storage.get_secret(STEAMID64, "revocation_code") is None
     for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE, passphrase]:
         assert secret not in output
 
@@ -676,6 +715,19 @@ def test_approve_refuses_wrong_confirmation_phrase_without_action(monkeypatch, c
     assert calls == []
     assert f"account: fixture ({STEAMID64})" in output
     assert "Approval cancelled." in output
+
+
+def test_cancel_refuses_wrong_confirmation_phrase_without_action(monkeypatch, capsys):
+    calls = []
+    _patch_confirmation_context(monkeypatch, calls)
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["cancel", STEAMID64, "abc"]) == 1
+
+    output = capsys.readouterr().out
+    assert calls == []
+    assert f"account: fixture ({STEAMID64})" in output
+    assert "Cancellation cancelled." in output
 
 
 def test_approve_reports_account_lock(monkeypatch, capsys):

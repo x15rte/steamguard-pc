@@ -73,7 +73,21 @@ def test_import_backup_restores_metadata_and_secrets(monkeypatch, tmp_path, keyr
 
     assert storage.load_accounts()[STEAMID64] == metadata
     for field, value in SEEDED_SECRETS.items():
-        assert storage.get_secret(STEAMID64, field) == value
+        expected = None if field == "revocation_code" else value
+        assert storage.get_secret(STEAMID64, field) == expected
+
+
+def test_export_backup_can_include_revocation_code_with_opt_in(monkeypatch, tmp_path, keyring_store):
+    _use_fast_kdf(monkeypatch)
+    _seed_account()
+    path = tmp_path / "steamguard.sgbak"
+    backup.export_accounts(path, PASSPHRASE, include_revocation_code=True)
+    keyring_store.clear()
+    storage.save_accounts({})
+
+    assert backup.import_accounts(path, PASSPHRASE) == 1
+
+    assert storage.get_secret(STEAMID64, "revocation_code") == REVOCATION_CODE
 
 
 def test_import_backup_rejects_wrong_passphrase(monkeypatch, tmp_path, keyring_store):

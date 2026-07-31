@@ -77,7 +77,7 @@ Common workflows:
   steamguard-pc recovery-codes STEAMID64
       Create one-time recovery codes after typed consent.
 
-  steamguard-pc export-backup PATH [STEAMID64 ...]
+  steamguard-pc export-backup PATH [STEAMID64 ...] [--include-revocation-code]
       Write an encrypted SteamGuardPC backup after typed consent.
 
   steamguard-pc import-backup PATH
@@ -470,6 +470,13 @@ def _cmd_export_backup(args: argparse.Namespace) -> int:
         print(f"Warning: {warning}")
     print(f"This encrypted backup will contain Steam Guard secrets and session tokens for {len(selected_ids)} account(s).")
     print("Store the backup and passphrase separately. SteamGuardPC cannot recover a lost backup passphrase.")
+    if args.include_revocation_code:
+        print("Warning: this backup will include Steam Guard revocation codes.")
+        print("Revocation codes can remove authenticators; include them only for private offline recovery backups.")
+        revocation_expected = f"INCLUDE REVOCATION CODES {len(selected_ids)} ACCOUNTS"
+        if input(f"Type {revocation_expected!r} to include revocation codes: ") != revocation_expected:
+            print("Backup export cancelled.")
+            return 1
     expected = f"EXPORT BACKUP {len(selected_ids)} ACCOUNTS"
     if input(f"Type {expected!r} to write encrypted backup: ") != expected:
         print("Backup export cancelled.")
@@ -482,7 +489,13 @@ def _cmd_export_backup(args: argparse.Namespace) -> int:
     if passphrase != repeated:
         raise ValueError("backup passphrases do not match")
 
-    count = backup.export_accounts(args.path, passphrase, selected_ids, overwrite=args.force)
+    count = backup.export_accounts(
+        args.path,
+        passphrase,
+        selected_ids,
+        overwrite=args.force,
+        include_revocation_code=args.include_revocation_code,
+    )
     print(f"Wrote encrypted backup for {count} account(s) to {args.path}.")
     return 0
 
@@ -699,7 +712,7 @@ def _cmd_cancel(args: argparse.Namespace) -> int:
         )
         expected = f"CANCEL {args.confirmation_id}"
         if input(f"Type {expected!r} to cancel: ") != expected:
-            print("Approval cancelled.")
+            print("Cancellation cancelled.")
             return 1
 
         try:
@@ -834,6 +847,11 @@ def _build_parser() -> argparse.ArgumentParser:
     export_backup.add_argument("path", metavar="PATH", help="Destination .sgbak path.")
     export_backup.add_argument("steamid64", nargs="*", metavar="STEAMID64", help="Optional account IDs to export; defaults to all accounts.")
     export_backup.add_argument("--force", action="store_true", help="Overwrite an existing backup file.")
+    export_backup.add_argument(
+        "--include-revocation-code",
+        action="store_true",
+        help="Include stored Steam Guard revocation codes after an extra typed warning.",
+    )
     export_backup.set_defaults(func=_cmd_export_backup)
 
     import_backup = subparsers.add_parser(

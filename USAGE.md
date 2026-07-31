@@ -80,13 +80,13 @@ Find candidates:
 ### Export or import an encrypted backup
 
 ```powershell
-.\.venv\Scripts\steamguard-pc export-backup C:\path\to\steamguard.sgbak [<steamid64> ...]
+.\.venv\Scripts\steamguard-pc export-backup C:\path\to\steamguard.sgbak [--include-revocation-code] [<steamid64> ...]
 .\.venv\Scripts\steamguard-pc import-backup C:\path\to\steamguard.sgbak
 ```
 
 Export requires `EXPORT BACKUP <count> ACCOUNTS` and a backup passphrase typed twice. Import requires `IMPORT BACKUP` and the same passphrase. Backups contain authenticator secrets and session cookies, encrypted with a KeePassXC-style Argon2id + AES-256-CBC + HMAC-SHA512 profile; store the file and passphrase separately. Passphrases must be at least 16 characters.
 
-Use `--force` to overwrite an existing backup file. Use `--replace` to overwrite matching local accounts during import.
+`revocation_code` is excluded by default. Use `--include-revocation-code` only for private offline recovery backups; it prints a warning and requires `INCLUDE REVOCATION CODES <count> ACCOUNTS` before the normal export phrase. Use `--force` to overwrite an existing backup file. Use `--replace` to overwrite matching local accounts during import.
 
 ### Generate a login code
 
@@ -184,7 +184,7 @@ Remove-Item Env:STEAMGUARDPC_SESSIONID
 | `revocation-code STEAMID64` | Reveal the stored `R#####` code after consent. |
 | `recovery-codes STEAMID64` | Create one-time recovery codes after consent. |
 | `import-mafile PATH` | Import a decrypted `.maFile`. |
-| `export-backup PATH [STEAMID64 ...] [--force]` | Write an encrypted SteamGuardPC backup. |
+| `export-backup PATH [STEAMID64 ...] [--force] [--include-revocation-code]` | Write an encrypted SteamGuardPC backup. |
 | `import-backup PATH [--replace]` | Import an encrypted SteamGuardPC backup. |
 | `find-mafiles [DIR ...]` | Find `.maFile` files. |
 | `code STEAMID64 [--timestamp UNIX_TIME]` | Print a login code. |

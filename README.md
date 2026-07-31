@@ -37,7 +37,7 @@ Runtime dependencies: `keyring>=25`, `cryptography>=45`, `requests>=2.32`.
 | `enroll [ACCOUNT_NAME]` | Add and finalize a Steam mobile authenticator. |
 | `login [ACCOUNT_NAME]` | Sign in or refresh Steam Community session cookies. |
 | `import-mafile PATH` | Import a decrypted Steam Desktop Authenticator `.maFile`. |
-| `export-backup PATH [STEAMID64 ...]` | Write an encrypted SteamGuardPC backup after exact typed consent. |
+| `export-backup PATH [STEAMID64 ...] [--include-revocation-code]` | Write an encrypted SteamGuardPC backup after exact typed consent. |
 | `import-backup PATH` | Import an encrypted SteamGuardPC backup after exact typed consent. |
 | `code STEAMID64` | Print the current 5-character Steam Guard code. |
 | `confirmations STEAMID64` | List pending mobile confirmations. |
@@ -87,4 +87,4 @@ Secrets in keyring service `SteamGuardPC`:
 - `steamLoginSecure`
 - `sessionid`
 
-Encrypted backups are portable `.sgbak` JSON wrappers using a KeePassXC-style profile: Argon2id key derivation, AES-256-CBC encryption, and HMAC-SHA512 authentication. Store the backup file and passphrase separately; SteamGuardPC cannot recover a lost backup passphrase.
+Encrypted backups are portable `.sgbak` JSON wrappers using a KeePassXC-style profile: Argon2id key derivation, AES-256-CBC encryption, and HMAC-SHA512 authentication. Store the backup file and passphrase separately; SteamGuardPC cannot recover a lost backup passphrase. Backups exclude `revocation_code` by default; include it only with the explicit revocation-code export option and extra typed consent.
