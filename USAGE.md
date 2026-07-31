@@ -10,10 +10,10 @@ Examples assume this checkout install path:
 
 ## Safety quick facts
 
-- Secrets are stored in `keyring`; SteamGuardPC does not write plaintext secret fallback files.
+- Secrets are stored in keyring-backed secret storage.
 - `enroll` changes account security state and can affect Steam trade or market restrictions.
 - The Steam Guard revocation code is `R` followed by five digits. It can remove the authenticator.
-- `approve` and `cancel` never batch or auto-approve. They require exact typed consent for one confirmation.
+- `approve` and `cancel` act on one selected confirmation and require exact typed consent.
 - Steam Guard codes are time based. Keep Windows time synchronized.
 
 ## First run

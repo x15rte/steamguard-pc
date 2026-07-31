@@ -82,7 +82,7 @@ Common workflows:
       SHOW REVOCATION CODE <steamid64>. This code can remove the authenticator.
 
 Safety notes:
-  - Secrets are stored via keyring; no plaintext secret fallback is used.
+  - Secrets are stored via keyring-backed secret storage.
   - .maFile imports must be decrypted first and should not be kept in Git,
     Downloads, or cloud-sync folders.
   - Keep Windows time synchronized; Steam Guard codes are time based.

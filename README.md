@@ -1,18 +1,82 @@
+<div align="center">
+
 # SteamGuardPC
 
-SteamGuardPC is a Windows-focused Python CLI for Steam Guard. It stores Steam authenticator and session secrets in Windows secret storage through Python `keyring`, then uses them to generate login codes and handle mobile confirmations.
+**A careful Windows CLI for Steam Guard codes, authenticator enrollment, and one-at-a-time mobile confirmations.**
 
-It supports:
+[![Steam Guard helper](https://img.shields.io/badge/Steam%20Guard-helper-1b2838?style=for-the-badge&logo=steam&logoColor=white)](#steamguardpc)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](pyproject.toml)
+[![Windows focused](https://img.shields.io/badge/Windows-focused-0078D4?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0yIDRsOC0xdjhIMlY0em0xMC0xbDEwLTF2OUgxMlYzek0yIDEzaDh2OGwtOC0xdi03em0xMCAwaDEwdjlsLTEwLTF2LTh6Ii8%2BPC9zdmc%2B)](#requirements)
+[![Keyring required](https://img.shields.io/badge/secrets-keyring%20required-2E7D32?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik02IDEwVjhhNiA2IDAgMCAxIDEyIDB2MmgxYTEgMSAwIDAgMSAxIDF2MTBhMSAxIDAgMCAxLTEgMUg1YTEgMSAwIDAgMS0xLTFWMTFhMSAxIDAgMCAxIDEtMWgxem0yIDBoOFY4YTQgNCAwIDAgMC04IDB2MnoiLz48L3N2Zz4%3D)](#storage-model)
+[![Release workflow](https://img.shields.io/github/actions/workflow/status/x15rte/steamguardPC/release.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=release)](https://github.com/x15rte/steamguardPC/actions/workflows/release.yml)
 
-- Interactive Steam sign-in and session refresh.
-- Adding a new mobile authenticator, including Steam's email/SMS activation-code validation step.
-- Importing an existing decrypted Steam Desktop Authenticator-compatible `.maFile`.
-- Offline 5-character Steam Guard login-code generation.
-- Listing pending Steam mobile confirmations.
-- Approving or cancelling one selected confirmation after exact typed consent.
-- Revealing the stored `R#####` Steam Guard revocation code after exact typed consent.
+</div>
 
-It intentionally does not auto-approve confirmations, run background polling, store plaintext secret backups, or provide a GUI.
+---
+
+## What it is
+
+SteamGuardPC is a small, security-first command-line app for Steam Guard utilities on a Windows PC, with explicit review before every account-changing action.
+
+It keeps the interaction model deliberately explicit:
+
+| Need | Command | Guardrail |
+| --- | --- | --- |
+| First-run setup | `steamguard-pc setup` | Choose enrollment, login-only, or `.maFile` import. |
+| Add a new authenticator | `steamguard-pc enroll <account_name>` | Requires `ADD AUTHENTICATOR <steamid64>`. |
+| Show a login code | `steamguard-pc code <steamid64>` | Prints seconds remaining in the 30-second window. |
+| Review confirmations | `steamguard-pc confirmations <steamid64>` | Lists pending mobile confirmations only. |
+| Approve or cancel | `steamguard-pc approve/cancel ...` | Acts on one selected confirmation after exact typed consent. |
+| Back up recovery material | `steamguard-pc revocation-code <steamid64>` | Requires `SHOW REVOCATION CODE <steamid64>`. |
+
+## Operating boundaries
+
+SteamGuardPC keeps risky actions visible and local.
+
+- Confirmation actions require a selected ID and exact typed consent.
+- Secrets stay in keyring-backed secret storage.
+- Authenticator enrollment uses Steam's activation-code validation; phone-number management stays outside this tool.
+- The interface is a CLI so prompts, targets, and consent phrases stay visible.
+
+## Core features
+
+### Authenticator setup
+
+`enroll` signs in, asks for explicit consent, requests a new Steam mobile authenticator, stores the new secrets before finalization, displays the `R#####` revocation code when Steam returns one, then completes Steam's email/SMS activation-code validation process.
+
+If no activation code arrives, the prompt accepts:
+
+```text
+SEND ACTIVATION EMAIL <steamid64>
+```
+
+SteamGuardPC then asks Steam to send an activation-code email and prompts again.
+
+### Existing authenticator import
+
+`import-mafile` imports a decrypted Steam Desktop Authenticator-compatible `.maFile`, validates required fields, stores secrets in keyring, and prints only the account label plus SteamID64.
+
+Encrypted or unsupported files are rejected with a clear error.
+
+### Offline login codes
+
+`code` generates Steam's 5-character login code locally from the stored `shared_secret` and prints the remaining seconds:
+
+```text
+CX2MR expires_in=30s
+Clock must be synchronized with Steam; sync Windows time if Steam rejects this code.
+```
+
+### Manual confirmations
+
+`approve` and `cancel` first show the selected confirmation details, then require an exact phrase:
+
+```text
+APPROVE <confirmation_id>
+CANCEL <confirmation_id>
+```
+
+A success message is printed only after Steam accepts the action and a refreshed confirmation list no longer contains the target.
 
 ## Requirements
 
@@ -21,7 +85,7 @@ It intentionally does not auto-approve confirmations, run background polling, st
 - A working Python `keyring` backend, normally Windows Credential Manager.
 - Network access to Steam for `setup`, `login`, `enroll`, `confirmations`, `approve`, and `cancel`.
 
-Runtime dependencies are declared in `pyproject.toml`:
+Runtime dependencies:
 
 - `keyring>=25`
 - `requests>=2.32`
@@ -33,11 +97,10 @@ Development/test extras:
 
 ## Install from this checkout
 
-From the repository root:
-
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
+.\.venv\Scripts\steamguard-pc --help
 ```
 
 If `py -3.11` is unavailable, use any installed Python `>=3.11`:
@@ -47,107 +110,84 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
-Check the CLI:
-
-```powershell
-.\.venv\Scripts\steamguard-pc --help
-```
-
-## Quick start
-
-Run the guided setup:
+## First run
 
 ```powershell
 .\.venv\Scripts\steamguard-pc setup
 ```
 
-Setup can:
-
-1. Sign in and add a new mobile authenticator.
-2. Sign in only, to store or refresh Steam Community session cookies.
-3. Import an existing decrypted `.maFile`.
-
-After setup:
+Then verify the account and generate a code:
 
 ```powershell
 .\.venv\Scripts\steamguard-pc accounts
 .\.venv\Scripts\steamguard-pc code <steamid64>
-.\.venv\Scripts\steamguard-pc confirmations <steamid64>
 ```
 
-If you enrolled an authenticator in this app, back up the revocation code immediately:
+If you enrolled a new authenticator, back up the revocation code immediately in a private terminal:
 
 ```powershell
 .\.venv\Scripts\steamguard-pc revocation-code <steamid64>
 ```
 
-The usage guide has command workflows and troubleshooting: [USAGE.md](USAGE.md).
+For full workflows, command reference, and troubleshooting, use [USAGE.md](USAGE.md).
 
 ## Storage model
 
-Plain account metadata is stored in:
+Plain metadata lives in:
 
 ```text
 %APPDATA%\SteamGuardPC\config.json
 ```
 
-If `%APPDATA%` is unavailable, the fallback is:
+Fallback when `%APPDATA%` is unavailable:
 
 ```text
 %USERPROFILE%\AppData\Roaming\SteamGuardPC\config.json
 ```
 
-For tests or isolated runs, override the config directory:
+Secrets live in Python `keyring` under service name `SteamGuardPC`.
+
+| Stored in config | Stored in keyring |
+| --- | --- |
+| account name | `shared_secret` |
+| SteamID64 | `identity_secret` |
+| device id | `revocation_code` |
+| metadata only | `refresh_token` |
+| metadata only | `access_token` |
+| metadata only | `steamLoginSecure` |
+| metadata only | `sessionid` |
+
+For tests or isolated runs:
 
 ```powershell
 $env:STEAMGUARDPC_CONFIG_DIR = "C:\path\to\isolated-config"
 ```
 
-Secrets are stored through Python `keyring` under service name `SteamGuardPC`. The config file must not contain:
+## Security model
 
-- `shared_secret`
-- `identity_secret`
-- `revocation_code`
-- `refresh_token`
-- `access_token`
-- `steamLoginSecure`
-- `sessionid`
+### Treat every secret like an account credential
 
-## Security notes
+Do not paste Steam passwords, authenticator secrets, session tokens, cookies, generated login codes, activation codes, or revocation codes into chat, GitHub issues, logs, screenshots, shell history, or support tickets.
 
-### Treat stored values as account credentials
+### `keyring` is mandatory
 
-The Steam password, authenticator secrets, session tokens, cookies, generated login codes, activation codes, and revocation code are sensitive. Do not paste them into chat, GitHub issues, logs, screenshots, shell history, or support tickets.
-
-### Secret storage is mandatory
-
-Production code fails closed if `keyring` is unavailable. It does not write plaintext fallback JSON files. If keyring fails, fix the Windows/Python keyring backend instead of adding plaintext storage.
+Production code fails closed if secret storage is unavailable. Fix the Windows/Python keyring backend before storing credentials.
 
 ### `config.json` is not a backup
 
-`config.json` contains metadata only. Losing Windows Credential Manager entries or deleting keyring secrets can make SteamGuardPC unable to generate codes, refresh sessions, reveal the revocation code, or act on confirmations.
+Deleting Credential Manager entries can make SteamGuardPC unable to generate codes, refresh sessions, reveal the revocation code, or act on confirmations.
 
-### Enrolling an authenticator changes account state
+### The revocation code is powerful
 
-`enroll` calls Steam APIs to add and finalize a mobile authenticator. It stores the new secrets before finalization, displays the `R#####` revocation code if Steam returns one, and then asks for Steam's activation code from email or SMS. The CLI does not add or link a phone number.
+Steam's `revocation_code` is `R` followed by five digits. It can remove the authenticator from the account. Store it offline.
 
-Test enrollment on a low-value account before relying on it for accounts with valuable inventory or market activity.
+### Time matters
 
-### The revocation code can remove the authenticator
+Steam Guard codes and confirmation keys depend on time. Keep Windows time synchronized.
 
-Steam's `revocation_code` is `R` followed by five digits. Store it offline. `steamguard-pc revocation-code <steamid64>` prints it only after the exact phrase `SHOW REVOCATION CODE <steamid64>`.
+### Keep exported `.maFile` files out of risky folders
 
-### Confirmation actions are intentionally manual
-
-`approve` and `cancel` act on one confirmation at a time. Each command prints the selected confirmation, requires an exact consent phrase, sends one Steam request, then refreshes the list and reports success only after the target disappears.
-
-### Keep Windows time synchronized
-
-Steam Guard login codes and confirmation keys are time based. If Steam rejects valid-looking codes, sync Windows time and generate a fresh code near the start of its 30-second window.
-
-### Keep `.maFile` exports out of unsafe locations
-
-Do not keep `.maFile` files in this repository, `Downloads`, or cloud-sync folders. SteamGuardPC warns about common risky import paths, but it cannot protect files after import.
+Avoid storing `.maFile` exports in this repository, `Downloads`, or cloud-sync folders. SteamGuardPC warns about common risky import paths, but it cannot protect files after import.
 
 ## Development
 
