@@ -1,6 +1,8 @@
 import io
 import json
 
+import pytest
+
 from steamguard_pc import cli
 from steamguard_pc.models import AccountMetadata, Confirmation
 
@@ -20,6 +22,22 @@ def test_code_timestamp_prints_deterministic_code(monkeypatch, capsys):
         "Clock must be synchronized with Steam; sync Windows time if Steam rejects this code.",
     ]
 
+
+
+def test_top_level_help_is_descriptive(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["-h"])
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out
+    assert "SteamGuardPC is a Windows-focused Steam Guard helper." in output
+    assert "Common workflows:" in output
+    assert "steamguard-pc setup" in output
+    assert "shared_secret" in output
+    assert "commands:" in output
+    assert "setup" in output
+    assert "Guided first-run setup." in output
+    assert "Run `steamguard-pc COMMAND -h`" in output
 
 def test_import_mafile_does_not_print_secret_values(monkeypatch, tmp_path, capsys):
     mafile_path = tmp_path / "account.maFile"
