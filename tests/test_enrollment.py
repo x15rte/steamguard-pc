@@ -9,6 +9,7 @@ from steamguard_pc.enrollment import (
     FINALIZE_AUTHENTICATOR_URL,
     CREATE_EMERGENCY_CODES_URL,
     SEND_EMAIL_URL,
+    REMOVE_AUTHENTICATOR_URL,
     MOBILE_APP_USER_AGENT,
     AuthenticatorAlreadyPresentError,
     EnrollmentClient,
@@ -174,3 +175,37 @@ def test_create_emergency_codes_rejects_missing_codes(requests_mock):
 
     with pytest.raises(EnrollmentError, match="^Steam emergency-code response is missing codes$"):
         EnrollmentClient().create_emergency_codes("access-token", code="13579")
+
+
+def test_remove_authenticator_posts_revocation_payload(requests_mock):
+    requests_mock.post(REMOVE_AUTHENTICATOR_URL, json={"response": {"success": True}})
+
+    EnrollmentClient().remove_authenticator("access-token", " R12345 ")
+
+    request = requests_mock.request_history[-1]
+    assert request.qs["access_token"] == ["access-token"]
+    form = request_form(request)
+    assert form == {
+        "revocation_code": "R12345",
+        "revocation_reason": "1",
+        "steamguard_scheme": "1",
+    }
+    assert "remove_all_steamguard_cookies" not in form
+    assert request.headers["User-Agent"] == MOBILE_APP_USER_AGENT
+
+
+def test_remove_authenticator_reports_attempts_remaining(requests_mock):
+    requests_mock.post(REMOVE_AUTHENTICATOR_URL, json={"response": {"success": False, "revocation_attempts_remaining": 2}})
+
+    with pytest.raises(EnrollmentError) as excinfo:
+        EnrollmentClient().remove_authenticator("access-token", "R12345")
+
+    assert str(excinfo.value) == "Steam rejected remove-authenticator request (2 revocation-code attempts remaining)"
+
+
+def test_remove_authenticator_rejects_missing_revocation_code(requests_mock):
+    with pytest.raises(ValueError) as excinfo:
+        EnrollmentClient().remove_authenticator("access-token", "   ")
+
+    assert str(excinfo.value) == "revocation_code is required"
+    assert requests_mock.request_history == []

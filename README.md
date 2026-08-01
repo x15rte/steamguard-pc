@@ -1,6 +1,6 @@
 # SteamGuardPC
 
-SteamGuardPC is a Windows command-line tool for managing Steam Guard on a PC. It can import an existing Steam Desktop Authenticator `.maFile` or enroll a new mobile authenticator, generate 5-character Steam Guard login codes, approve or deny Steam login confirmations, and list or act on Steam mobile confirmations.
+SteamGuardPC is a Windows command-line tool for managing Steam Guard on a PC. It can import an existing Steam Desktop Authenticator `.maFile` or enroll a new mobile authenticator, remove a stored mobile authenticator from Steam, generate 5-character Steam Guard login codes, approve or deny Steam login confirmations, and list or act on Steam mobile confirmations.
 
 It is not affiliated with Valve or Steam.
 
@@ -9,7 +9,7 @@ It is not affiliated with Valve or Steam.
 - Windows.
 - Python 3.11 or newer.
 - A working `keyring` backend. On Windows this should use Windows secret storage; the null backend is rejected.
-- Network access to Steam when signing in, enrolling, refreshing sessions, querying Steam time, creating recovery codes, or handling login/mobile confirmations.
+- Network access to Steam when signing in, enrolling, removing authenticators, refreshing sessions, querying Steam time, creating recovery codes, or handling login/mobile confirmations.
 
 ## Install from this checkout
 
@@ -135,6 +135,14 @@ steamguard-pc export-backup C:\private\steamguard.sgbak --include-revocation-cod
 
 Use `--force` to overwrite an existing backup and `--replace` when importing over matching local accounts.
 
+### Remove a mobile authenticator
+
+```powershell
+steamguard-pc remove-authenticator STEAMID64
+```
+
+This sends Steam the stored R##### revocation code over the stored MobileApp session and asks Steam to return the account to Steam Guard email codes. Steam warns that removing a mobile authenticator reduces account security and prevents trading or Community Market selling for 15 days. After Steam confirms removal, SteamGuardPC deletes local authenticator secrets but keeps local account metadata and sign-in/session tokens; run steamguard-pc accounts --delete STEAMID64 to remove all local account data.
+
 ### Revocation and recovery codes
 
 ```powershell
@@ -142,7 +150,7 @@ steamguard-pc revocation-code STEAMID64
 steamguard-pc recovery-codes STEAMID64
 ```
 
-The revocation code is Steam's `R#####` authenticator-removal code. SteamGuardPC reveals it only after exact typed consent. Recovery codes are one-time Steam account recovery codes; newly created codes are printed once and are not saved.
+The revocation code is Steam's `R#####` authenticator-removal code. `remove-authenticator` uses it to ask Steam to remove the mobile authenticator and never prints it. `revocation-code` reveals it only after exact typed consent. Recovery codes are one-time Steam account recovery codes; newly created codes are printed once and are not saved.
 
 ## Command reference
 
@@ -168,6 +176,7 @@ Run `steamguard-pc COMMAND -h` for command-specific options.
 | `cookie-guide` | Show browser steps for copying Steam Community cookies. |
 | `set-cookies STEAMID64` | Store `steamLoginSecure` and `sessionid` from environment variables or hidden prompts. |
 | `revocation-code STEAMID64` | Reveal the stored authenticator revocation code after exact typed consent. |
+| `remove-authenticator STEAMID64` | Remove the mobile authenticator from Steam after exact typed consent and delete local authenticator secrets. |
 | `recovery-codes STEAMID64` | Create and print one-time Steam recovery codes after exact typed consent. |
 | `export-backup PATH [STEAMID64 ...]` | Export selected accounts, secrets, and session tokens to an encrypted backup. |
 | `import-backup PATH [--replace]` | Import accounts from an encrypted SteamGuardPC backup. |
@@ -178,6 +187,7 @@ SteamGuardPC stores metadata and secrets separately:
 
 - `%APPDATA%\SteamGuardPC\config.json` stores non-secret metadata: SteamID64, account name, generated device id, and import timestamp.
 - Windows secret storage stores sensitive fields under the `SteamGuardPC` service: shared secret, identity secret, revocation code, refresh/access tokens, Steam Community cookies, and imported SDA metadata.
+- `remove-authenticator` deletes local authenticator material (`shared_secret`, `identity_secret`, `revocation_code`, `serial_number`, `token_gid`, and `uri`) after Steam confirms removal. `accounts --delete` removes the whole local account and all stored secrets.
 - Per-account lock files live under `%APPDATA%\SteamGuardPC\locks` to prevent overlapping confirmation or deletion operations.
 - Set `STEAMGUARDPC_CONFIG_DIR` to move the config and lock directory.
 
@@ -186,7 +196,7 @@ Steam passwords are prompted only during `login` or `enroll` and are not stored.
 ## Notes and limits
 
 - Adding a new authenticator changes Steam account security state and can affect trade or market holds.
-- Deleting an account in SteamGuardPC removes only local metadata and secrets. It does not remove the authenticator from Steam.
+- Use `remove-authenticator` to remove the mobile authenticator from Steam. Deleting an account with `accounts --delete` only removes local metadata and secrets.
 - Sign-in supports email codes, mobile authenticator codes, and email/mobile approval prompts; use `login-confirmations`/`approve-login`/`deny-login` to approve or deny other pending Steam login requests. Unsupported Steam risk checks or agreement prompts must be completed outside this tool before retrying.
 - If confirmations report an expired session, run `steamguard-pc login ACCOUNT_NAME` or `steamguard-pc set-cookies STEAMID64`.
 - If Steam rejects generated codes, sync Windows time or use `steamguard-pc code STEAMID64 --steam-time`.

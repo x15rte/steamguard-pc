@@ -95,6 +95,10 @@ Quick paths:
       Sign in, add a new mobile authenticator, store its secrets, and finalize with
       Steam's activation code.
 
+  steamguard-pc remove-authenticator STEAMID64
+      Remove the mobile authenticator from Steam after exact typed consent,
+      then delete local authenticator secrets.
+
   steamguard-pc revocation-code STEAMID64
   steamguard-pc recovery-codes STEAMID64
       Reveal the stored R##### revocation code, or create one-time Steam recovery
@@ -864,6 +868,30 @@ def _cmd_recovery_codes(args: argparse.Namespace) -> int:
     print("Store these one-time codes offline. They are not saved by SteamGuardPC.")
     return 0
 
+def _cmd_remove_authenticator(args: argparse.Namespace) -> int:
+    with operation_lock.account_operation_lock(args.steamid64):
+        metadata = storage.load_accounts().get(args.steamid64)
+        if metadata is None:
+            raise KeyError(f"missing account metadata for {args.steamid64}")
+        label = _account_label(metadata)
+
+        print(f"Remove Steam Guard mobile authenticator from {label}?")
+        print("This changes Steam account security state. Steam says removal reduces account security and blocks trading or Community Market selling for 15 days.")
+        print("SteamGuardPC will delete local authenticator secrets after Steam confirms removal. Local account metadata and sign-in/session tokens are kept.")
+        expected = f"REMOVE AUTHENTICATOR {args.steamid64}"
+        if input(f"Type {expected!r} to remove this authenticator: ") != expected:
+            print("Authenticator removal cancelled.")
+            return 1
+
+        revocation_code = storage.get_required_secret(args.steamid64, "revocation_code")
+        access_token, _ = session.refresh_auth_tokens(args.steamid64)
+        enrollment.EnrollmentClient().remove_authenticator(access_token, revocation_code)
+        storage.delete_authenticator_secrets(args.steamid64)
+
+        print(f"Removed Steam Guard mobile authenticator from {label}.")
+        print(f"Deleted local authenticator secrets. Sign-in/session tokens remain; run `steamguard-pc accounts --delete {args.steamid64}` to delete the local account.")
+        return 0
+
 
 def _cmd_approve(args: argparse.Namespace) -> int:
     with operation_lock.account_operation_lock(args.steamid64):
@@ -1211,6 +1239,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     revocation_code.add_argument("steamid64", metavar="STEAMID64", help="Stored account to use.")
     revocation_code.set_defaults(func=_cmd_revocation_code)
+
+    remove_authenticator = subparsers.add_parser(
+        "remove-authenticator",
+        usage="steamguard-pc remove-authenticator STEAMID64",
+        help="Remove the mobile authenticator from Steam.",
+        description="Remove the Steam Guard mobile authenticator from Steam after exact typed consent, then delete local authenticator secrets.",
+        formatter_class=_HelpFormatter,
+    )
+    remove_authenticator.add_argument("steamid64", metavar="STEAMID64", help="Stored account to use.")
+    remove_authenticator.set_defaults(func=_cmd_remove_authenticator)
 
     recovery_codes = subparsers.add_parser(
         "recovery-codes",

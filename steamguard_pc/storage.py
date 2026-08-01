@@ -26,6 +26,15 @@ SECRET_FIELDS = {
     "uri",
 }
 
+AUTHENTICATOR_SECRET_FIELDS = (
+    "shared_secret",
+    "identity_secret",
+    "revocation_code",
+    "serial_number",
+    "token_gid",
+    "uri",
+)
+
 
 class SecretStorageUnavailable(RuntimeError):
     pass
@@ -148,6 +157,14 @@ def delete_account(steamid64: str) -> AccountMetadata:
         delete_secret(steamid64, field)
     save_accounts(accounts)
     return metadata
+
+def delete_authenticator_secrets(steamid64: str) -> None:
+    accounts = load_accounts()
+    if steamid64 not in accounts:
+        raise KeyError(f"missing account metadata for {steamid64}")
+
+    for field in AUTHENTICATOR_SECRET_FIELDS:
+        delete_secret(steamid64, field)
 
 
 def store_imported_guard(imported: ImportedSteamGuard) -> AccountMetadata:

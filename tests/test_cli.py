@@ -49,6 +49,7 @@ def test_top_level_help_is_descriptive(capsys):
     assert "Authenticator secrets stay in Windows secret storage" not in output
     assert "Quick paths:" in output
     assert "revocation-code" in output
+    assert "remove-authenticator" in output
     assert "login-confirmations" in output
     assert "approve-login" in output
     assert "deny-login" in output
@@ -83,6 +84,96 @@ def test_revocation_code_prints_after_exact_phrase(monkeypatch, keyring_store, c
     assert "R followed by five digits" in output
     assert f"Steam Guard revocation code for fixture ({STEAMID64}): {REVOCATION_CODE}" in output
 
+
+
+def test_remove_authenticator_requires_exact_phrase(monkeypatch, keyring_store, capsys):
+    cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture"))
+    cli.storage.put_secret(STEAMID64, "revocation_code", REVOCATION_CODE)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unexpected Steam removal path")
+
+    monkeypatch.setattr(cli.storage, "get_required_secret", forbidden)
+    monkeypatch.setattr(cli.session, "refresh_auth_tokens", forbidden)
+    monkeypatch.setattr(cli.enrollment, "EnrollmentClient", forbidden)
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["remove-authenticator", STEAMID64]) == 1
+
+    output = capsys.readouterr().out
+    assert "Authenticator removal cancelled." in output
+    assert REVOCATION_CODE not in output
+
+
+def test_remove_authenticator_calls_steam_then_deletes_local_authenticator_secrets(monkeypatch, keyring_store, capsys):
+    cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture", device_id="android:fixture"))
+    seeded_fields = {
+        "shared_secret": SHARED_SECRET,
+        "identity_secret": IDENTITY_SECRET,
+        "revocation_code": REVOCATION_CODE,
+        "serial_number": "serial-1",
+        "token_gid": "token-gid-1",
+        "uri": "otpauth://totp/steam?secret=fixture",
+        "refresh_token": "refresh-token",
+        "access_token": "access-token",
+        "access_token_obtained_at": "1700000000",
+        "steamLoginSecure": "secure-cookie",
+        "sessionid": "session-cookie",
+    }
+    for field, value in seeded_fields.items():
+        cli.storage.put_secret(STEAMID64, field, value)
+
+    refresh_calls = []
+    remove_calls = []
+
+    def refresh_auth_tokens(steamid64):
+        refresh_calls.append(steamid64)
+        return "access-token", "refresh-token"
+
+    class FakeEnrollmentClient:
+        def remove_authenticator(self, access_token, revocation_code):
+            remove_calls.append((access_token, revocation_code))
+            assert cli.storage.get_secret(STEAMID64, "shared_secret") == SHARED_SECRET
+
+    monkeypatch.setattr(cli.session, "refresh_auth_tokens", refresh_auth_tokens)
+    monkeypatch.setattr(cli.enrollment, "EnrollmentClient", FakeEnrollmentClient)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"REMOVE AUTHENTICATOR {STEAMID64}\n"))
+
+    assert cli.main(["remove-authenticator", STEAMID64]) == 0
+
+    assert refresh_calls == [STEAMID64]
+    assert remove_calls == [("access-token", REVOCATION_CODE)]
+    for field in ("shared_secret", "identity_secret", "revocation_code", "serial_number", "token_gid", "uri"):
+        assert cli.storage.get_secret(STEAMID64, field) is None
+    for field in ("refresh_token", "access_token", "access_token_obtained_at", "steamLoginSecure", "sessionid"):
+        assert cli.storage.get_secret(STEAMID64, field) == seeded_fields[field]
+    metadata = cli.storage.load_accounts()[STEAMID64]
+    assert metadata.device_id == "android:fixture"
+
+    output = capsys.readouterr().out
+    assert "blocks trading or Community Market selling for 15 days" in output
+    assert f"Removed Steam Guard mobile authenticator from fixture ({STEAMID64})." in output
+    assert REVOCATION_CODE not in output
+    assert SHARED_SECRET not in output
+    assert IDENTITY_SECRET not in output
+
+
+def test_remove_authenticator_missing_revocation_code_does_not_refresh_or_cleanup(monkeypatch, keyring_store, capsys):
+    cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture", device_id="android:fixture"))
+    cli.storage.put_secret(STEAMID64, "shared_secret", SHARED_SECRET)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unexpected Steam removal path")
+
+    monkeypatch.setattr(cli.session, "refresh_auth_tokens", forbidden)
+    monkeypatch.setattr(cli.enrollment, "EnrollmentClient", forbidden)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"REMOVE AUTHENTICATOR {STEAMID64}\n"))
+
+    assert cli.main(["remove-authenticator", STEAMID64]) == 1
+
+    captured = capsys.readouterr()
+    assert f"missing revocation_code for {STEAMID64}" in captured.err
+    assert cli.storage.get_secret(STEAMID64, "shared_secret") == SHARED_SECRET
 
 def test_recovery_codes_requires_exact_phrase(monkeypatch, keyring_store, capsys):
     cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture"))

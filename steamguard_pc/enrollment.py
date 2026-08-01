@@ -13,6 +13,9 @@ ADD_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/AddAuthenticator/v1
 FINALIZE_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/FinalizeAddAuthenticator/v1/"
 SEND_EMAIL_URL = f"{STEAM_API_BASE}/ITwoFactorService/SendEmail/v1/"
 CREATE_EMERGENCY_CODES_URL = f"{STEAM_API_BASE}/ITwoFactorService/CreateEmergencyCodes/v1/"
+REMOVE_AUTHENTICATOR_URL = f"{STEAM_API_BASE}/ITwoFactorService/RemoveAuthenticator/v1/"
+REVOCATION_REASON_USER_REQUESTED = "1"
+STEAM_GUARD_SCHEME_EMAIL = "1"
 REQUEST_TIMEOUT = 30
 AUTHENTICATOR_TYPE_MOBILE_APP = "1"
 ADD_AUTHENTICATOR_VERSION = "2"
@@ -185,6 +188,37 @@ class EnrollmentClient:
             raise EnrollmentError("Steam emergency-code response is missing codes")
         return codes
 
+    def remove_authenticator(
+        self,
+        access_token: str,
+        revocation_code: str,
+        steamguard_scheme: str = STEAM_GUARD_SCHEME_EMAIL,
+    ) -> None:
+        stripped_revocation_code = revocation_code.strip()
+        if not stripped_revocation_code:
+            raise ValueError("revocation_code is required")
+
+        payload = self._post(
+            REMOVE_AUTHENTICATOR_URL,
+            params={"access_token": access_token},
+            data={
+                "revocation_code": stripped_revocation_code,
+                "revocation_reason": REVOCATION_REASON_USER_REQUESTED,
+                "steamguard_scheme": str(steamguard_scheme),
+            },
+        )
+        response = payload.get("response", payload)
+        if not isinstance(response, dict):
+            raise EnrollmentError("Steam remove-authenticator response is malformed")
+
+        if response.get("success"):
+            return
+
+        attempts = response.get("revocation_attempts_remaining")
+        if (isinstance(attempts, int) and not isinstance(attempts, bool)) or (isinstance(attempts, str) and attempts.isdecimal()):
+            raise EnrollmentError(f"Steam rejected remove-authenticator request ({attempts} revocation-code attempts remaining)")
+        raise EnrollmentError("Steam rejected remove-authenticator request")
+
     def _post(
         self,
         url: str,
@@ -195,13 +229,13 @@ class EnrollmentClient:
             response = self.http.post(url, params=params, data=data, headers={"User-Agent": MOBILE_APP_USER_AGENT}, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
         except requests.exceptions.RequestException as exc:
-            raise EnrollmentTransportError("Steam enrollment request failed") from exc
+            raise EnrollmentTransportError("Steam two-factor request failed") from exc
         try:
             payload = response.json()
         except ValueError as exc:
-            raise EnrollmentError("Steam enrollment response is not JSON") from exc
+            raise EnrollmentError("Steam two-factor response is not JSON") from exc
         if not isinstance(payload, dict):
-            raise EnrollmentError("Steam enrollment response is malformed")
+            raise EnrollmentError("Steam two-factor response is malformed")
         return payload
 
 
