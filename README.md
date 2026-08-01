@@ -48,7 +48,7 @@ If you already have a `.maFile`:
 steamguard-pc setup --mafile C:\path\to\account.maFile
 ```
 
-Encrypted SDA `.maFile` imports prompt for the SDA passkey and require the matching `manifest.json` beside the file.
+Encrypted SDA `.maFile` imports prompt for the SDA passkey and require the matching `manifest.json` beside the file. When a `.maFile` contains SDA session tokens or cookies, SteamGuardPC imports them and can skip manual cookie setup.
 
 After setup:
 
@@ -150,7 +150,7 @@ Run `steamguard-pc COMMAND -h` for command-specific options.
 | `approve-all STEAMID64` | Approve the current batch only if every displayed item is Trade or Market listing. |
 | `cancel-all STEAMID64` | Cancel every displayed pending confirmation after exact typed consent. |
 | `find-mafiles [DIR ...]` | Search common SDA locations or supplied directories for `.maFile` files. |
-| `import-mafile PATH` | Import shared and identity secrets from a Steam Desktop Authenticator file. |
+| `import-mafile PATH` | Import shared/identity secrets and SDA session fields from a Steam Desktop Authenticator file. |
 | `cookie-guide` | Show browser steps for copying Steam Community cookies. |
 | `set-cookies STEAMID64` | Store `steamLoginSecure` and `sessionid` from environment variables or hidden prompts. |
 | `revocation-code STEAMID64` | Reveal the stored authenticator revocation code after exact typed consent. |

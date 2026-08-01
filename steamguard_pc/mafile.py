@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -93,6 +94,25 @@ def _optional_str(value: object) -> str | None:
     return None
 
 
+def _session_str(session_dict: dict[str, Any], *names: str) -> str | None:
+    for name in names:
+        value = _optional_str(session_dict.get(name))
+        if value is not None:
+            return value
+    return None
+
+
+def _steam_login_secure_from_session(steamid64: str, session_dict: dict[str, Any]) -> str | None:
+    explicit = _session_str(session_dict, "SteamLoginSecure", "steamLoginSecure")
+    if explicit is not None:
+        return explicit
+
+    access_token = _session_str(session_dict, "AccessToken", "access_token")
+    if access_token is None:
+        return None
+    return quote(f"{steamid64}||{access_token}", safe="")
+
+
 def _steamid64_from(raw: dict[str, object]) -> str:
     session = raw.get("Session")
     session_dict = session if isinstance(session, dict) else {}
@@ -139,14 +159,10 @@ def parse_mafile(raw: dict[str, object]) -> ImportedSteamGuard:
         identity_secret=identity_secret,
         revocation_code=_optional_str(raw.get("revocation_code")),
         device_id=device_id,
-        refresh_token=_optional_str(session_dict.get("RefreshToken")),
-        access_token=_optional_str(session_dict.get("AccessToken")),
-        steam_login_secure=(
-            _optional_str(session_dict.get("SteamLoginSecure"))
-            or _optional_str(session_dict.get("steamLoginSecure"))
-        ),
-        sessionid=_optional_str(session_dict.get("SessionID"))
-        or _optional_str(session_dict.get("sessionid")),
+        refresh_token=_session_str(session_dict, "RefreshToken", "refresh_token"),
+        access_token=_session_str(session_dict, "AccessToken", "access_token"),
+        steam_login_secure=_steam_login_secure_from_session(steamid64, session_dict),
+        sessionid=_session_str(session_dict, "SessionID", "sessionid"),
         serial_number=_optional_str(raw.get("serial_number")) or _optional_str(raw.get("SerialNumber")),
         token_gid=_optional_str(raw.get("token_gid")) or _optional_str(raw.get("TokenGID")),
         uri=_optional_str(raw.get("uri")) or _optional_str(raw.get("URI")),

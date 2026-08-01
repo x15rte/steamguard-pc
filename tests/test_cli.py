@@ -502,6 +502,44 @@ def test_setup_stores_environment_cookies_without_printing_them(monkeypatch, tmp
     assert "secure-cookie" not in output
     assert "session-cookie" not in output
 
+def test_setup_uses_sda_session_tokens_as_imported_cookies(monkeypatch, tmp_path, capsys):
+    mafile_path = tmp_path / "account.maFile"
+    mafile_path.write_text(
+        json.dumps(
+            {
+                "account_name": "fixture",
+                "shared_secret": SHARED_SECRET,
+                "identity_secret": IDENTITY_SECRET,
+                "Session": {
+                    "SteamID": int(STEAMID64),
+                    "AccessToken": "access-token",
+                    "RefreshToken": "refresh-token",
+                    "SessionID": "session-cookie",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def store_imported_guard(imported):
+        assert imported.steam_login_secure == f"{STEAMID64}%7C%7Caccess-token"
+        assert imported.sessionid == "session-cookie"
+        return AccountMetadata(
+            steamid64=imported.steamid64,
+            account_name=imported.account_name,
+            device_id=imported.device_id,
+            last_imported_at="2026-07-31T00:00:00Z",
+        )
+
+    monkeypatch.setattr(cli.storage, "store_imported_guard", store_imported_guard)
+
+    assert cli.main(["setup", "--mafile", str(mafile_path)]) == 0
+
+    output = capsys.readouterr().out
+    assert "Steam Community cookies were imported from the .maFile." in output
+    assert "access-token" not in output
+    assert "session-cookie" not in output
+
 
 
 def test_login_command_stores_tokens_cookies_and_metadata(monkeypatch, keyring_store, capsys):

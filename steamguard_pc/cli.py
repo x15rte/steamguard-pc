@@ -81,8 +81,8 @@ Quick paths:
 
   steamguard-pc import-mafile PATH
   steamguard-pc find-mafiles [DIR ...]
-      Import Steam Desktop Authenticator files; encrypted SDA files prompt for
-      the SDA passkey.
+      Import Steam Desktop Authenticator files. Session tokens/cookies are used
+      when present; encrypted SDA files prompt for the SDA passkey.
 
   steamguard-pc enroll [ACCOUNT_NAME]
       Sign in, add a new mobile authenticator, store its secrets, and finalize with
@@ -890,14 +890,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Guided first-run setup.",
         description=(
             "Guided setup: enroll a new authenticator, sign in for Steam Community cookies,\n"
-            "or import a Steam Desktop Authenticator .maFile."
+            "or import a Steam Desktop Authenticator .maFile. Imported SDA session\n"
+            "tokens/cookies are used when present."
         ),
         formatter_class=_HelpFormatter,
     )
     setup.add_argument(
         "--mafile",
         metavar="PATH",
-        help="Import this .maFile during setup; encrypted SDA files prompt for the passkey.",
+        help="Import this .maFile; use session tokens/cookies when present and prompt for encrypted SDA passkey.",
     )
     setup.add_argument(
         "--skip-cookies",
@@ -934,7 +935,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "import-mafile",
         help="Import a Steam Desktop Authenticator file.",
         description=(
-            "Import shared and identity secrets from a .maFile.\n"
+            "Import shared/identity secrets and SDA session fields from a .maFile.\n"
             "Encrypted Steam Desktop Authenticator files prompt for the SDA passkey."
         ),
         formatter_class=_HelpFormatter,

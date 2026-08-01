@@ -125,6 +125,24 @@ def test_parse_mafile_normalizes_valid_file_with_session_fields():
     assert imported.sessionid == "session-cookie"
 
 
+def test_parse_current_sda_session_derives_steam_login_secure():
+    imported = parse_mafile(
+        valid_mafile(
+            Session={
+                "SteamID": int(STEAMID64),
+                "AccessToken": "access-token",
+                "RefreshToken": "refresh-token",
+                "SessionID": "session-cookie",
+            }
+        )
+    )
+
+    assert imported.steamid64 == STEAMID64
+    assert imported.access_token == "access-token"
+    assert imported.refresh_token == "refresh-token"
+    assert imported.steam_login_secure == f"{STEAMID64}%7C%7Caccess-token"
+    assert imported.sessionid == "session-cookie"
+
 def test_parse_mafile_generates_device_id_when_missing():
     imported = parse_mafile(valid_mafile())
 
