@@ -13,21 +13,9 @@ It is not affiliated with Valve or Steam.
 
 ## Install
 
-From this checkout:
-
 ```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
 python -m pip install .
 steamguard-pc --help
-```
-
-For development:
-
-```powershell
-python -m pip install -e ".[dev]"
-python -m pytest
 ```
 
 ## Quick start
