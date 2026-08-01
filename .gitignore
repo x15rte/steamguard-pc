@@ -17,6 +17,7 @@ dist/
 .env.*
 config.json
 steamguard-pc/
+AGENTS.md
 
 # Steam authenticator exports and local backups
 *.maFile
