@@ -1,92 +1,178 @@
 # SteamGuardPC
 
-Windows Python CLI for Steam Guard codes, authenticator enrollment, and confirmation handling.
+SteamGuardPC is a Windows command-line tool for managing Steam Guard on a PC. It can import an existing Steam Desktop Authenticator `.maFile` or enroll a new mobile authenticator, generate 5-character Steam Guard login codes, and list or act on Steam mobile confirmations.
 
-## Quick start
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[dev]"
-.\.venv\Scripts\steamguard-pc setup
-```
-
-Then:
-
-```powershell
-.\.venv\Scripts\steamguard-pc accounts
-.\.venv\Scripts\steamguard-pc code <steamid64>
-.\.venv\Scripts\steamguard-pc confirmations <steamid64>
-```
-
-Full command guide: [USAGE.md](USAGE.md).
+It is not affiliated with Valve or Steam.
 
 ## Requirements
 
-- Windows-focused.
-- Python `>=3.11`.
-- Working Python `keyring` backend, normally Windows Credential Manager.
-- Steam network access for sign-in, enrollment, confirmations, and session refresh.
+- Windows.
+- Python 3.11 or newer.
+- A working `keyring` backend. On Windows this should use Windows secret storage; the null backend is rejected.
+- Network access to Steam when signing in, enrolling, refreshing sessions, querying Steam time, creating recovery codes, or handling confirmations.
 
-Runtime dependencies: `keyring>=25`, `cryptography>=45`, `requests>=2.32`.
+## Install from this checkout
 
-## Commands
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install .
+steamguard-pc --help
+```
+
+For development:
+
+```powershell
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+## Quick start
+
+Run the guided setup:
+
+```powershell
+steamguard-pc setup
+```
+
+Setup offers three paths:
+
+1. Sign in and add a new mobile authenticator in SteamGuardPC.
+2. Sign in only, storing the Steam Community session used by confirmation commands.
+3. Import an existing Steam Desktop Authenticator `.maFile`.
+
+If you already have a `.maFile`:
+
+```powershell
+steamguard-pc setup --mafile C:\path\to\account.maFile
+```
+
+Encrypted SDA `.maFile` imports prompt for the SDA passkey and require the matching `manifest.json` beside the file.
+
+After setup:
+
+```powershell
+steamguard-pc accounts
+steamguard-pc code STEAMID64 --steam-time
+steamguard-pc confirmations STEAMID64
+```
+
+## Common workflows
+
+### Generate a login code
+
+```powershell
+steamguard-pc code STEAMID64
+steamguard-pc code STEAMID64 --steam-time
+```
+
+`--steam-time` asks Steam for the current server time before generating the code. Use it if Steam rejects local-clock codes.
+
+### Review and act on confirmations
+
+```powershell
+steamguard-pc confirmations STEAMID64
+steamguard-pc approve STEAMID64 CONFIRMATION_ID
+steamguard-pc cancel  STEAMID64 CONFIRMATION_ID
+```
+
+Single confirmation actions fetch the current confirmation, show its details, try to show a trade-offer id when available, then require an exact typed phrase before submitting.
+
+Batch actions are also available:
+
+```powershell
+steamguard-pc approve-all STEAMID64
+steamguard-pc cancel-all  STEAMID64
+```
+
+`approve-all` only submits when every displayed item is a Trade or Market listing confirmation. `cancel-all` cancels every displayed confirmation after exact typed consent.
+
+### Refresh or set Steam Community cookies
+
+Confirmation commands need a valid Steam Community session. Refresh it by signing in:
+
+```powershell
+steamguard-pc login ACCOUNT_NAME
+```
+
+Or copy cookies manually:
+
+```powershell
+steamguard-pc cookie-guide
+$env:STEAMGUARDPC_STEAM_LOGIN_SECURE = "..."
+$env:STEAMGUARDPC_SESSIONID = "..."
+steamguard-pc set-cookies STEAMID64
+```
+
+Only `steamLoginSecure` and `sessionid` are needed. Treat both like passwords.
+
+### Back up and restore
+
+```powershell
+steamguard-pc export-backup C:\private\steamguard.sgbak [STEAMID64 ...]
+steamguard-pc import-backup C:\private\steamguard.sgbak
+```
+
+Backups use Argon2id key derivation, AES-256-CBC encryption, and HMAC-SHA512 authentication before decrypting. The passphrase must be at least 16 characters. Store the backup and passphrase separately; SteamGuardPC cannot recover a lost passphrase.
+
+Revocation codes are excluded from backups by default. Include them only for private offline recovery backups:
+
+```powershell
+steamguard-pc export-backup C:\private\steamguard.sgbak --include-revocation-code
+```
+
+Use `--force` to overwrite an existing backup and `--replace` when importing over matching local accounts.
+
+### Revocation and recovery codes
+
+```powershell
+steamguard-pc revocation-code STEAMID64
+steamguard-pc recovery-codes STEAMID64
+```
+
+The revocation code is Steam's `R#####` authenticator-removal code. SteamGuardPC reveals it only after exact typed consent. Recovery codes are one-time Steam account recovery codes; newly created codes are printed once and are not saved.
+
+## Command reference
+
+Run `steamguard-pc COMMAND -h` for command-specific options.
 
 | Command | Purpose |
 | --- | --- |
-| `setup` | Guided first run: enroll, login-only, or `.maFile` import. |
-| `enroll [ACCOUNT_NAME]` | Add and finalize a Steam mobile authenticator. |
-| `login [ACCOUNT_NAME]` | Sign in or refresh Steam Community session cookies. |
-| `accounts [--delete STEAMID64]` | List stored account metadata, or delete one stored account after exact typed consent. |
-| `import-mafile PATH` | Import a Steam Desktop Authenticator `.maFile`; encrypted SDA files prompt for the SDA passkey. |
-| `export-backup PATH [STEAMID64 ...] [--include-revocation-code]` | Write an encrypted SteamGuardPC backup after exact typed consent. |
-| `import-backup PATH` | Import an encrypted SteamGuardPC backup after exact typed consent. |
-| `code STEAMID64` | Print the current 5-character Steam Guard code. |
+| `setup [--mafile PATH] [--skip-cookies]` | Guided setup. Enroll, sign in for cookies, or import a `.maFile`. |
+| `enroll [ACCOUNT_NAME]` | Sign in, add a mobile authenticator, store its secrets, and finalize with Steam's activation code. |
+| `login [ACCOUNT_NAME]` | Sign in and store refresh/access tokens plus Steam Community session data. |
+| `accounts [--delete STEAMID64]` | List local accounts or delete one local account and all of its stored secrets. Steam is not changed. |
+| `code STEAMID64 [--timestamp UNIX_TIME] [--steam-time]` | Print a Steam Guard login code and seconds remaining. |
 | `confirmations STEAMID64` | List pending mobile confirmations. |
-| `approve STEAMID64 ID` | Approve one confirmation after exact typed consent. |
-| `cancel STEAMID64 ID` | Cancel one confirmation after exact typed consent. |
-| `approve-all STEAMID64` | Review and approve every displayed confirmation after exact typed consent. |
-| `cancel-all STEAMID64` | Review and cancel every displayed confirmation after exact typed consent. |
-| `revocation-code STEAMID64` | Reveal the stored `R#####` revocation code after exact typed consent. |
-| `recovery-codes STEAMID64` | Create one-time Steam recovery codes after exact typed consent. |
+| `approve STEAMID64 CONFIRMATION_ID` | Approve one pending confirmation after review and exact typed consent. |
+| `cancel STEAMID64 CONFIRMATION_ID` | Cancel one pending confirmation after review and exact typed consent. |
+| `approve-all STEAMID64` | Approve the current batch only if every displayed item is Trade or Market listing. |
+| `cancel-all STEAMID64` | Cancel every displayed pending confirmation after exact typed consent. |
+| `find-mafiles [DIR ...]` | Search common SDA locations or supplied directories for `.maFile` files. |
+| `import-mafile PATH` | Import shared and identity secrets from a Steam Desktop Authenticator file. |
+| `cookie-guide` | Show browser steps for copying Steam Community cookies. |
+| `set-cookies STEAMID64` | Store `steamLoginSecure` and `sessionid` from environment variables or hidden prompts. |
+| `revocation-code STEAMID64` | Reveal the stored authenticator revocation code after exact typed consent. |
+| `recovery-codes STEAMID64` | Create and print one-time Steam recovery codes after exact typed consent. |
+| `export-backup PATH [STEAMID64 ...]` | Export selected accounts, secrets, and session tokens to an encrypted backup. |
+| `import-backup PATH [--replace]` | Import accounts from an encrypted SteamGuardPC backup. |
 
-## Consent phrases
+## Storage and security model
 
-| Action | Required phrase |
-| --- | --- |
-| Add authenticator | `ADD AUTHENTICATOR <steamid64>` |
-| Request activation email | `SEND ACTIVATION EMAIL <steamid64>` |
-| Show revocation code | `SHOW REVOCATION CODE <steamid64>` |
-| Delete stored account | `DELETE ACCOUNT <steamid64>` |
-| Create recovery codes | `CREATE RECOVERY CODES <steamid64>` |
-| Approve confirmation | `APPROVE <confirmation_id>` |
-| Cancel confirmation | `CANCEL <confirmation_id>` |
-| Approve all confirmations | `APPROVE ALL <count> CONFIRMATIONS <steamid64>` |
-| Cancel all confirmations | `CANCEL ALL <count> CONFIRMATIONS <steamid64>` |
-| Export encrypted backup | `EXPORT BACKUP <count> ACCOUNTS` |
-| Import encrypted backup | `IMPORT BACKUP` |
+SteamGuardPC stores metadata and secrets separately:
 
-## Storage
+- `%APPDATA%\SteamGuardPC\config.json` stores non-secret metadata: SteamID64, account name, generated device id, and import timestamp.
+- Windows secret storage stores sensitive fields under the `SteamGuardPC` service: shared secret, identity secret, revocation code, refresh/access tokens, Steam Community cookies, and imported SDA metadata.
+- Per-account lock files live under `%APPDATA%\SteamGuardPC\locks` to prevent overlapping confirmation or deletion operations.
+- Set `STEAMGUARDPC_CONFIG_DIR` to move the config and lock directory.
 
-Plain metadata:
+Steam passwords are prompted only during `login` or `enroll` and are not stored. Sensitive operations require exact typed consent, and the CLI avoids printing secrets except for commands whose purpose is to reveal newly created or stored recovery material. `.maFile` files and backups contain authenticator secrets; keep them out of Git, Downloads, cloud-sync folders, logs, screenshots, and issue reports.
 
-```text
-%APPDATA%\SteamGuardPC\config.json
-```
+## Notes and limits
 
-For isolated metadata:
-
-```powershell
-$env:STEAMGUARDPC_CONFIG_DIR = "C:\path\to\isolated-config"
-```
-
-Secrets in keyring service `SteamGuardPC`:
-
-- `shared_secret`
-- `identity_secret`
-- `revocation_code`
-- `refresh_token`
-- `access_token`
-- `steamLoginSecure`
-- `sessionid`
-
-Encrypted backups are portable `.sgbak` JSON wrappers using a KeePassXC-style profile: Argon2id key derivation, AES-256-CBC encryption, and HMAC-SHA512 authentication. Store the backup file and passphrase separately; SteamGuardPC cannot recover a lost backup passphrase. Backups exclude `revocation_code` by default; include it only with the explicit revocation-code export option and extra typed consent.
+- Adding a new authenticator changes Steam account security state and can affect trade or market holds.
+- Deleting an account in SteamGuardPC removes only local metadata and secrets. It does not remove the authenticator from Steam.
+- Sign-in supports email codes, mobile authenticator codes, and email/mobile approval prompts. Unsupported Steam risk checks or agreement prompts must be completed outside this tool before retrying.
+- If confirmations report an expired session, run `steamguard-pc login ACCOUNT_NAME` or `steamguard-pc set-cookies STEAMID64`.
+- If Steam rejects generated codes, sync Windows time or use `steamguard-pc code STEAMID64 --steam-time`.
