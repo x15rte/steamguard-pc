@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel>=0.47.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,16 +8,16 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "keyring>=25",
-  "cryptography>=45",
-  "requests>=2.32",
+  "keyring>=25.7.0",
+  "cryptography>=50.0.0",
+  "requests>=2.34.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8",
-  "pyright>=1.1.410",
-  "requests-mock>=1.12",
+  "pytest>=9.1.1",
+  "pyright>=1.1.411",
+  "requests-mock>=1.12.1",
 ]
 
 [project.scripts]
