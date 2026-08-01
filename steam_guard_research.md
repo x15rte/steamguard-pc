@@ -425,7 +425,7 @@ Recommended dependencies:
 
 Windows storage recommendations:
 
-- Store non-secret config under `%APPDATA%\SteamGuardPC\config.json` or `%LOCALAPPDATA%\SteamGuardPC` using `pathlib.Path(os.environ["APPDATA"])`.
+- Store non-secret config under `%APPDATA%\steamguard-pc\config.json` or `%LOCALAPPDATA%\steamguard-pc` using `pathlib.Path(os.environ["APPDATA"])`.
 - Store each `shared_secret`, `identity_secret`, refresh token, and `steamLoginSecure` in Windows Credential Manager/DPAPI, keyed by SteamID64.
 - Keep `.maFile` imports out of the project directory and warn if the selected file is inside a Git checkout, Downloads, or cloud-sync folder.
 - Add a lock/single-instance guard if the UI can approve confirmations; two processes could otherwise reuse stale confirmation data.
@@ -435,7 +435,7 @@ Recommended `storage.py` boundary:
 ```python
 import keyring
 
-SERVICE = "SteamGuardPC"
+SERVICE = "steamguard-pc"
 
 
 def _secret_name(steamid64: str, field: str) -> str:

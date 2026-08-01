@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 import msvcrt
@@ -17,7 +17,7 @@ def lock_path(steamid64: str) -> Path:
 
 
 @contextmanager
-def account_operation_lock(steamid64: str) -> Iterator[None]:
+def account_operation_lock(steamid64: str) -> Generator[None, None, None]:
     path = lock_path(steamid64)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
@@ -25,7 +25,7 @@ def account_operation_lock(steamid64: str) -> Iterator[None]:
         try:
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, LOCK_BYTES)
         except OSError as exc:
-            raise OperationLockError(f"another SteamGuardPC operation is already running for {steamid64}") from exc
+            raise OperationLockError(f"another steamguard-pc operation is already running for {steamid64}") from exc
         try:
             yield
         finally:

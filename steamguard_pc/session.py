@@ -131,7 +131,7 @@ def get_community_session(
                 return refresh_community_session(steamid64, renew_refresh_token=renew_refresh, now=current_time)
 
     session = requests.Session()
-    session.headers.update({"User-Agent": "SteamGuardPC/0.1 requests"})
+    session.headers.update({"User-Agent": "steamguard-pc/0.1 requests"})
     for domain in (COOKIE_DOMAIN, f".{COOKIE_DOMAIN}"):
         session.cookies.set("steamLoginSecure", steam_login_secure, domain=domain, path="/")
         session.cookies.set("sessionid", sessionid, domain=domain, path="/")

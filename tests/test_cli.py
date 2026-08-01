@@ -80,7 +80,7 @@ def test_top_level_help_is_descriptive(capsys):
 
     assert excinfo.value.code == 0
     output = capsys.readouterr().out
-    assert "SteamGuardPC manages Steam Guard accounts from a local Windows terminal." not in output
+    assert "steamguard-pc manages Steam Guard accounts from a local Windows terminal." not in output
     assert "Authenticator secrets stay in Windows secret storage" not in output
     assert "Quick paths:" not in output
     assert "revocation-code" in output
@@ -267,7 +267,7 @@ def test_recovery_codes_requests_confirmation_and_prints_codes(monkeypatch, keyr
     assert f"Steam recovery codes for fixture ({STEAMID64}):" in output
     assert "12345678" in output
     assert "87654321" in output
-    assert "They are not saved by SteamGuardPC." in output
+    assert "They are not saved by steamguard-pc." in output
     assert "13579" not in output
     assert refresh_calls == [STEAMID64]
     assert FakeEnrollmentClient.instances[0].calls == [("access-token", None), ("access-token", "13579")]
@@ -604,7 +604,7 @@ def test_setup_imports_mafile_and_skips_cookie_prompts(monkeypatch, tmp_path, ca
     assert cli.main(["setup", "--mafile", str(mafile_path), "--skip-cookies"]) == 0
 
     output = capsys.readouterr().out
-    assert "SteamGuardPC setup" in output
+    assert "steamguard-pc setup" in output
     assert f"Imported fixture ({STEAMID64})" in output
     assert "Skipped cookie setup." in output
     assert f"Next: steamguard-pc code {STEAMID64}" in output
@@ -640,8 +640,8 @@ def test_setup_stores_environment_cookies_without_printing_them(monkeypatch, tmp
 
     monkeypatch.setattr(cli.storage, "store_imported_guard", store_imported_guard)
     monkeypatch.setattr(cli.session, "save_community_cookies", save_community_cookies)
-    monkeypatch.setenv("STEAMGUARDPC_STEAM_LOGIN_SECURE", "secure-cookie")
-    monkeypatch.setenv("STEAMGUARDPC_SESSIONID", "session-cookie")
+    monkeypatch.setenv("STEAMGUARD_PC_STEAM_LOGIN_SECURE", "secure-cookie")
+    monkeypatch.setenv("STEAMGUARD_PC_SESSIONID", "session-cookie")
 
     assert cli.main(["setup", "--mafile", str(mafile_path)]) == 0
 
@@ -1341,7 +1341,7 @@ def test_cancel_refuses_wrong_confirmation_phrase_without_action(monkeypatch, ca
 def test_approve_reports_account_lock(monkeypatch, capsys):
     calls = []
     _patch_confirmation_context(monkeypatch, calls)
-    message = f"another SteamGuardPC operation is already running for {STEAMID64}"
+    message = f"another steamguard-pc operation is already running for {STEAMID64}"
 
     @contextmanager
     def account_operation_lock(steamid64):

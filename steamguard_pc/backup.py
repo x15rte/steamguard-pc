@@ -82,7 +82,7 @@ def unsafe_backup_path_warnings(path: str | Path) -> list[str]:
 
 
 def _malformed() -> NoReturn:
-    raise BackupFormatError("SteamGuardPC backup is malformed")
+    raise BackupFormatError("steamguard-pc backup is malformed")
 
 
 def _validate_passphrase(passphrase: str) -> None:
@@ -131,7 +131,7 @@ def _decode_base64_field(raw: Mapping[str, object], field: str, expected_length:
     try:
         decoded = base64.b64decode(value.encode("ascii"), validate=True)
     except Exception as exc:
-        raise BackupFormatError("SteamGuardPC backup is malformed") from exc
+        raise BackupFormatError("steamguard-pc backup is malformed") from exc
     if expected_length is not None and len(decoded) != expected_length:
         _malformed()
     return decoded
@@ -292,7 +292,7 @@ def _load_json_file(path: str | Path) -> Mapping[str, Any]:
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
     except (JSONDecodeError, UnicodeDecodeError) as exc:
-        raise BackupFormatError("SteamGuardPC backup is malformed") from exc
+        raise BackupFormatError("steamguard-pc backup is malformed") from exc
     if not isinstance(raw, dict):
         _malformed()
     return raw
@@ -334,7 +334,7 @@ def _decrypt_plaintext(path: str | Path, passphrase: str) -> Mapping[str, Any]:
     try:
         plain = json.loads(plaintext.decode("utf-8"))
     except (JSONDecodeError, UnicodeDecodeError) as exc:
-        raise BackupFormatError("SteamGuardPC backup is malformed") from exc
+        raise BackupFormatError("steamguard-pc backup is malformed") from exc
     if not isinstance(plain, dict):
         _malformed()
     if plain.get("format") != PLAINTEXT_FORMAT or plain.get("version") != BACKUP_VERSION:
@@ -343,7 +343,7 @@ def _decrypt_plaintext(path: str | Path, passphrase: str) -> Mapping[str, Any]:
     if not isinstance(accounts, list):
         _malformed()
     if not accounts:
-        raise BackupFormatError("SteamGuardPC backup contains no accounts")
+        raise BackupFormatError("steamguard-pc backup contains no accounts")
     return plain
 
 
@@ -374,7 +374,7 @@ def _account_from_backup(raw: object) -> tuple[AccountMetadata, dict[str, str]]:
             try:
                 crypto.validate_base64_secret(value, field)
             except ValueError as exc:
-                raise BackupFormatError("SteamGuardPC backup is malformed") from exc
+                raise BackupFormatError("steamguard-pc backup is malformed") from exc
         secrets[field] = value
     return metadata, secrets
 

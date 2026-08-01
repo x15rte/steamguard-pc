@@ -10,7 +10,9 @@ from keyring.errors import KeyringError, PasswordDeleteError
 from .models import AccountMetadata, ImportedSteamGuard
 
 
-SERVICE = "SteamGuardPC"
+APP_NAME = "steamguard-pc"
+SERVICE = APP_NAME
+CONFIG_ENV_VAR = "STEAMGUARD_PC_CONFIG_DIR"
 CONFIG_SCHEMA_VERSION = 1
 SECRET_FIELDS = {
     "shared_secret",
@@ -50,16 +52,20 @@ def ensure_secret_storage_available() -> None:
         raise SecretStorageUnavailable("Windows secret storage is unavailable; keyring is using the null backend")
 
 
-def config_dir() -> Path:
-    configured = os.environ.get("STEAMGUARDPC_CONFIG_DIR")
-    if configured:
-        return Path(configured)
-
+def _default_config_base() -> Path:
     appdata = os.environ.get("APPDATA")
     if appdata:
-        return Path(appdata) / "SteamGuardPC"
+        return Path(appdata)
+    return Path.home() / "AppData" / "Roaming"
 
-    return Path.home() / "AppData" / "Roaming" / "SteamGuardPC"
+
+def config_dir() -> Path:
+    configured = os.environ.get(CONFIG_ENV_VAR)
+    if configured:
+        return Path(configured)
+    return _default_config_base() / APP_NAME
+
+
 
 
 def config_path() -> Path:
@@ -72,30 +78,42 @@ def secret_name(steamid64: str, field: str) -> str:
     return f"{steamid64}:{field}"
 
 
-def put_secret(steamid64: str, field: str, value: str) -> None:
-    ensure_secret_storage_available()
+def _set_password(service: str, name: str, value: str) -> None:
     try:
-        keyring.set_password(SERVICE, secret_name(steamid64, field), value)
+        keyring.set_password(service, name, value)
     except KeyringError as exc:
         raise SecretStorageUnavailable("Windows secret storage is unavailable") from exc
 
 
-def get_secret(steamid64: str, field: str) -> str | None:
-    ensure_secret_storage_available()
+def _get_password(service: str, name: str) -> str | None:
     try:
-        return keyring.get_password(SERVICE, secret_name(steamid64, field))
+        return keyring.get_password(service, name)
     except KeyringError as exc:
         raise SecretStorageUnavailable("Windows secret storage is unavailable") from exc
 
 
-def delete_secret(steamid64: str, field: str) -> None:
-    ensure_secret_storage_available()
+def _delete_password(service: str, name: str) -> None:
     try:
-        keyring.delete_password(SERVICE, secret_name(steamid64, field))
+        keyring.delete_password(service, name)
     except PasswordDeleteError:
         pass
     except KeyringError as exc:
         raise SecretStorageUnavailable("Windows secret storage is unavailable") from exc
+
+
+def put_secret(steamid64: str, field: str, value: str) -> None:
+    ensure_secret_storage_available()
+    _set_password(SERVICE, secret_name(steamid64, field), value)
+
+
+def get_secret(steamid64: str, field: str) -> str | None:
+    ensure_secret_storage_available()
+    return _get_password(SERVICE, secret_name(steamid64, field))
+
+
+def delete_secret(steamid64: str, field: str) -> None:
+    ensure_secret_storage_available()
+    _delete_password(SERVICE, secret_name(steamid64, field))
 
 
 def load_accounts() -> dict[str, AccountMetadata]:

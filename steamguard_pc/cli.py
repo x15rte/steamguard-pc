@@ -20,6 +20,9 @@ from .enrollment import EnrollmentError
 from .session import SessionExpiredError
 from .storage import SecretStorageUnavailable
 
+STEAM_LOGIN_SECURE_ENV_VAR = "STEAMGUARD_PC_STEAM_LOGIN_SECURE"
+SESSIONID_ENV_VAR = "STEAMGUARD_PC_SESSIONID"
+
 
 EXPECTED_ERRORS = (
     ValueError,
@@ -445,8 +448,8 @@ def _find_current_confirmation(steamid64: str, confirmation_id: str) -> tuple[st
 
 def _cookie_values_from_env() -> tuple[str | None, str | None]:
     return (
-        os.environ.get("STEAMGUARDPC_STEAM_LOGIN_SECURE"),
-        os.environ.get("STEAMGUARDPC_SESSIONID"),
+        os.environ.get(STEAM_LOGIN_SECURE_ENV_VAR),
+        os.environ.get(SESSIONID_ENV_VAR),
     )
 
 
@@ -506,7 +509,7 @@ def _store_cookies_from_env(steamid64: str) -> bool:
     steam_login_secure, sessionid = _cookie_values_from_env()
     if bool(steam_login_secure) != bool(sessionid):
         raise ValueError(
-            "set both STEAMGUARDPC_STEAM_LOGIN_SECURE and STEAMGUARDPC_SESSIONID, or set neither"
+            f"set both {STEAM_LOGIN_SECURE_ENV_VAR} and {SESSIONID_ENV_VAR}, or set neither"
         )
     if not steam_login_secure or not sessionid:
         return False
@@ -723,7 +726,7 @@ def _delete_account_with_consent(steamid64: str) -> int:
 
         label = _account_label(metadata)
         print(_danger(f"Delete stored account {label}?"))
-        print(_warning("This removes local SteamGuardPC metadata and all stored secrets for this account."))
+        print(_warning("This removes local steamguard-pc metadata and all stored secrets for this account."))
         print(_muted("This does not remove the authenticator from Steam."))
         expected = f"DELETE ACCOUNT {steamid64}"
         if input(_prompt(f"Type {expected!r} to delete this account: ")) != expected:
@@ -784,7 +787,7 @@ def _cmd_export_backup(args: argparse.Namespace) -> int:
     for warning in backup.unsafe_backup_path_warnings(args.path):
         print(_warning(f"Warning: {warning}"))
     print(_warning(f"This encrypted backup will contain Steam Guard secrets and session tokens for {len(selected_ids)} account(s)."))
-    print(_muted("Store the backup and passphrase separately. SteamGuardPC cannot recover a lost backup passphrase."))
+    print(_muted("Store the backup and passphrase separately. steamguard-pc cannot recover a lost backup passphrase."))
     if args.include_revocation_code:
         print(_warning("Warning: this backup will include Steam Guard revocation codes."))
         print(_warning("Revocation codes can remove authenticators; include them only for private offline recovery backups."))
@@ -818,7 +821,7 @@ def _cmd_export_backup(args: argparse.Namespace) -> int:
 def _cmd_import_backup(args: argparse.Namespace) -> int:
     for warning in backup.unsafe_backup_path_warnings(args.path):
         print(_warning(f"Warning: {warning}"))
-    print(_warning("This will import Steam Guard secrets from an encrypted SteamGuardPC backup."))
+    print(_warning("This will import Steam Guard secrets from an encrypted steamguard-pc backup."))
     if args.replace:
         print(_warning("Existing matching accounts will be overwritten with values from the backup."))
     else:
@@ -836,8 +839,7 @@ def _cmd_import_backup(args: argparse.Namespace) -> int:
 
 
 def _cmd_set_cookies(args: argparse.Namespace) -> int:
-    steam_login_secure = os.environ.get("STEAMGUARDPC_STEAM_LOGIN_SECURE")
-    sessionid = os.environ.get("STEAMGUARDPC_SESSIONID")
+    steam_login_secure, sessionid = _cookie_values_from_env()
     if steam_login_secure is None or sessionid is None:
         steam_login_secure = getpass.getpass(_prompt("steamLoginSecure: "))
         sessionid = getpass.getpass(_prompt("sessionid: "))
@@ -864,7 +866,7 @@ def _cmd_find_mafiles(args: argparse.Namespace) -> int:
 
 
 def _cmd_setup(args: argparse.Namespace) -> int:
-    print(_info("SteamGuardPC setup"))
+    print(_info("steamguard-pc setup"))
     print(_muted("Secrets are stored in Windows secret storage; config.json stores metadata only."))
     if args.mafile:
         imported, metadata = _import_mafile_path(args.mafile)
@@ -990,7 +992,7 @@ def _cmd_recovery_codes(args: argparse.Namespace) -> int:
     print(_warning(f"Steam recovery codes for {label}:"))
     for code in codes:
         print(code)
-    print(_warning("Store these one-time codes offline. They are not saved by SteamGuardPC."))
+    print(_warning("Store these one-time codes offline. They are not saved by steamguard-pc."))
     return 0
 
 def _cmd_remove_authenticator(args: argparse.Namespace) -> int:
@@ -1002,7 +1004,7 @@ def _cmd_remove_authenticator(args: argparse.Namespace) -> int:
 
         print(_danger(f"Remove Steam Guard mobile authenticator from {label}?"))
         print(_warning("This changes Steam account security state. Steam says removal reduces account security and blocks trading or Community Market selling for 15 days."))
-        print(_muted("SteamGuardPC will delete local authenticator secrets after Steam confirms removal. Local account metadata and sign-in/session tokens are kept."))
+        print(_muted("steamguard-pc will delete local authenticator secrets after Steam confirms removal. Local account metadata and sign-in/session tokens are kept."))
         expected = f"REMOVE AUTHENTICATOR {args.steamid64}"
         if input(_prompt(f"Type {expected!r} to remove this authenticator: ")) != expected:
             print(_warning("Authenticator removal cancelled."))
@@ -1439,7 +1441,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Export an encrypted backup.",
         description=(
             "Export selected accounts, authenticator secrets, and session tokens\n"
-            "to an encrypted SteamGuardPC backup after exact typed consent."
+            "to an encrypted steamguard-pc backup after exact typed consent."
         ),
         formatter_class=_HelpFormatter,
     )
@@ -1456,10 +1458,10 @@ def _build_parser() -> argparse.ArgumentParser:
     import_backup = subparsers.add_parser(
         "import-backup",
         help="Import an encrypted backup.",
-        description="Import accounts from an encrypted SteamGuardPC backup after exact typed consent.",
+        description="Import accounts from an encrypted steamguard-pc backup after exact typed consent.",
         formatter_class=_HelpFormatter,
     )
-    import_backup.add_argument("path", metavar="PATH", help="Encrypted SteamGuardPC backup file path.")
+    import_backup.add_argument("path", metavar="PATH", help="Encrypted steamguard-pc backup file path.")
     import_backup.add_argument("--replace", action="store_true", help="Overwrite matching accounts already stored locally.")
     import_backup.set_defaults(func=_cmd_import_backup)
 

@@ -28,7 +28,7 @@ def test_get_community_session_sets_cookie_domains(keyring_store):
 
     session = get_community_session(STEAMID64)
 
-    assert session.headers["User-Agent"] == "SteamGuardPC/0.1 requests"
+    assert session.headers["User-Agent"] == "steamguard-pc/0.1 requests"
     cookies = {(cookie.name, cookie.domain): cookie.value for cookie in session.cookies}
     assert cookies[("steamLoginSecure", "steamcommunity.com")] == "secure-cookie"
     assert cookies[("sessionid", "steamcommunity.com")] == "session-cookie"

@@ -1,6 +1,6 @@
-# SteamGuardPC
+# steamguard-pc
 
-SteamGuardPC is a Windows command-line Steam Guard manager. It can import an existing Steam Desktop Authenticator `.maFile` or enroll a new mobile authenticator, generate Steam's 5-character login codes, approve or cancel mobile confirmations, approve or deny pending login confirmations, and back up local authenticator data.
+steamguard-pc is a Windows command-line Steam Guard manager. It can import an existing Steam Desktop Authenticator `.maFile` or enroll a new mobile authenticator, generate Steam's 5-character login codes, approve or cancel mobile confirmations, approve or deny pending login confirmations, and back up local authenticator data.
 
 It is not affiliated with Valve or Steam.
 
@@ -50,7 +50,7 @@ If you already have a `.maFile`:
 steamguard-pc setup --mafile C:\path\to\account.maFile
 ```
 
-Encrypted SDA files are supported when the matching `manifest.json` is beside the `.maFile`; SteamGuardPC prompts for the SDA passkey. If the file contains session tokens or cookies, they are imported without printing them.
+Encrypted SDA files are supported when the matching `manifest.json` is beside the `.maFile`; steamguard-pc prompts for the SDA passkey. If the file contains session tokens or cookies, they are imported without printing them.
 
 After setup:
 
@@ -113,8 +113,8 @@ Or copy cookies manually:
 
 ```powershell
 steamguard-pc cookie-guide
-$env:STEAMGUARDPC_STEAM_LOGIN_SECURE = "..."
-$env:STEAMGUARDPC_SESSIONID = "..."
+$env:STEAMGUARD_PC_STEAM_LOGIN_SECURE = "..."
+$env:STEAMGUARD_PC_SESSIONID = "..."
 steamguard-pc set-cookies STEAMID64
 ```
 
@@ -127,7 +127,7 @@ steamguard-pc export-backup C:\private\steamguard.sgbak [STEAMID64 ...]
 steamguard-pc import-backup C:\private\steamguard.sgbak
 ```
 
-Backups contain selected account metadata, authenticator secrets, and session tokens. They use Argon2id key derivation, AES-256-CBC encryption, and HMAC-SHA512 authentication. The passphrase must be at least 16 characters; SteamGuardPC cannot recover a lost passphrase.
+Backups contain selected account metadata, authenticator secrets, and session tokens. They use Argon2id key derivation, AES-256-CBC encryption, and HMAC-SHA512 authentication. The passphrase must be at least 16 characters; steamguard-pc cannot recover a lost passphrase.
 
 Revocation codes are excluded by default. Include them only for private offline recovery backups:
 
@@ -173,7 +173,7 @@ Run `steamguard-pc COMMAND -h` for command-specific options.
 | `cookie-guide` | Show browser steps for copying Steam Community cookies. |
 | `set-cookies STEAMID64` | Store `steamLoginSecure` and `sessionid` from environment variables or hidden prompts. |
 | `export-backup PATH [STEAMID64 ...] [--force] [--include-revocation-code]` | Export selected accounts to an encrypted backup. |
-| `import-backup PATH [--replace]` | Import accounts from an encrypted SteamGuardPC backup. |
+| `import-backup PATH [--replace]` | Import accounts from an encrypted steamguard-pc backup. |
 | `revocation-code STEAMID64` | Reveal the stored authenticator revocation code. |
 | `remove-authenticator STEAMID64` | Remove the Steam mobile authenticator and delete local authenticator secrets. |
 | `recovery-codes STEAMID64` | Create and print one-time Steam recovery codes. |
@@ -190,12 +190,12 @@ Global options:
 
 ## Storage and security model
 
-SteamGuardPC separates metadata from secrets:
+steamguard-pc separates metadata from secrets:
 
-- `%APPDATA%\SteamGuardPC\config.json` stores non-secret metadata: SteamID64, account name, generated device id, and import timestamp.
-- Windows secret storage stores sensitive fields under service `SteamGuardPC`: shared secret, identity secret, revocation code, refresh/access tokens, Steam Community cookies, serial number, token gid, and imported authenticator URI.
-- `%APPDATA%\SteamGuardPC\locks\` stores per-account lock files used to prevent overlapping destructive or confirmation operations.
-- Set `STEAMGUARDPC_CONFIG_DIR` to move the config and lock directory.
+- `%APPDATA%\steamguard-pc\config.json` stores non-secret metadata: SteamID64, account name, generated device id, and import timestamp.
+- Windows secret storage stores sensitive fields under service `steamguard-pc`: shared secret, identity secret, revocation code, refresh/access tokens, Steam Community cookies, serial number, token gid, and imported authenticator URI.
+- `%APPDATA%\steamguard-pc\locks\` stores per-account lock files used to prevent overlapping destructive or confirmation operations.
+- Set `STEAMGUARD_PC_CONFIG_DIR` to move the config and lock directory.
 
 Steam passwords are prompted only for `login`, `enroll`, or guided setup sign-in. Passwords are sent only to Steam over HTTPS and are not stored. The credential login flow is implemented in this project with Steam's authentication service: it fetches Steam's RSA key, encrypts the password client-side, handles supported Steam Guard code or approval challenges, polls for tokens, and stores only resulting tokens/cookies.
 
@@ -204,7 +204,7 @@ Sensitive operations require exact typed consent. The CLI avoids printing secret
 ## Notes and limits
 
 - Adding or removing a mobile authenticator changes Steam account security state and can affect trade or Community Market holds.
-- `accounts --delete STEAMID64` removes only local SteamGuardPC metadata and secrets. It does not remove the authenticator from Steam.
+- `accounts --delete STEAMID64` removes only local steamguard-pc metadata and secrets. It does not remove the authenticator from Steam.
 - Sign-in supports email codes, mobile authenticator codes, and email/mobile approval prompts. Unsupported Steam risk checks, CAPTCHA, agreements, or extra challenge URLs must be completed outside this tool before retrying.
 - If confirmations report an expired session, run `steamguard-pc login ACCOUNT_NAME` or `steamguard-pc set-cookies STEAMID64`.
 - If Steam rejects generated login codes, sync Windows time or use `steamguard-pc code STEAMID64 --steam-time`.

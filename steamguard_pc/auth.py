@@ -374,7 +374,7 @@ class SteamAuthClient:
             ],
         )
         fields: list[tuple[int, WireType, Any]] = [
-            (1, "length", "SteamGuardPC"),
+            (1, "length", "steamguard-pc"),
             (2, "length", account_name),
             (3, "length", encrypted_password),
             (4, "varint", int(rsa_key["timestamp"])),
