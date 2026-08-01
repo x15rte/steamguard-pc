@@ -558,8 +558,8 @@ def test_enroll_command_stores_generated_secrets_and_finalizes(monkeypatch, keyr
     calls = []
 
     class FakeEnrollmentClient:
-        def add_authenticator(self, access_token, steamid64, account_name=None, device_id=None):
-            calls.append(("add", access_token, steamid64, account_name, device_id))
+        def add_authenticator(self, access_token, steamid64, account_name=None, device_id=None, sms_phone_id=None):
+            calls.append(("add", access_token, steamid64, account_name, device_id, sms_phone_id))
             imported = cli.mafile.parse_mafile(
                 {
                     "steamid": STEAMID64,
@@ -572,20 +572,21 @@ def test_enroll_command_stores_generated_secrets_and_finalizes(monkeypatch, keyr
             )
             return cli.enrollment.AddAuthenticatorResult(imported=imported, raw={})
 
-        def finalize_authenticator(self, access_token, steamid64, shared_secret, activation_code):
-            calls.append(("finalize", access_token, steamid64, shared_secret, activation_code))
+        def finalize_authenticator(self, access_token, steamid64, shared_secret, activation_code, validate_sms_code=True):
+            calls.append(("finalize", access_token, steamid64, shared_secret, activation_code, validate_sms_code))
 
 
     monkeypatch.setattr(cli, "_login_and_store", lambda account_name: (result, metadata))
     monkeypatch.setattr(cli.enrollment, "EnrollmentClient", FakeEnrollmentClient)
-    monkeypatch.setattr("sys.stdin", io.StringIO(f"ADD AUTHENTICATOR {STEAMID64}\n12345\n"))
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"ADD AUTHENTICATOR {STEAMID64}\nn\n12345\n"))
 
     assert cli.main(["enroll", "fixture"]) == 0
 
     assert keyring_store[(cli.storage.SERVICE, f"{STEAMID64}:shared_secret")] == SHARED_SECRET
     assert keyring_store[(cli.storage.SERVICE, f"{STEAMID64}:identity_secret")] == IDENTITY_SECRET
     assert keyring_store[(cli.storage.SERVICE, f"{STEAMID64}:revocation_code")] == REVOCATION_CODE
-    assert calls[-1] == ("finalize", "access-token", STEAMID64, SHARED_SECRET, "12345")
+    assert calls[0] == ("add", "access-token", STEAMID64, "fixture", "android:fixture", None)
+    assert calls[-1] == ("finalize", "access-token", STEAMID64, SHARED_SECRET, "12345", False)
     output = capsys.readouterr().out
     assert f"Authenticator added and finalized for fixture ({STEAMID64})." in output
     assert f"Steam Guard revocation code for fixture ({STEAMID64}): {REVOCATION_CODE}" in output
@@ -596,6 +597,50 @@ def test_enroll_command_stores_generated_secrets_and_finalizes(monkeypatch, keyr
     assert "SMS activation code" not in output
     assert SHARED_SECRET not in output
     assert IDENTITY_SECRET not in output
+
+
+
+def test_enroll_command_uses_sms_phone_id_when_phone_is_linked(monkeypatch, keyring_store):
+    result = cli.auth.LoginResult(
+        steamid64=STEAMID64,
+        account_name="fixture",
+        refresh_token="refresh-token",
+        access_token="access-token",
+        steam_login_secure="secure-cookie",
+        sessionid="session-cookie",
+    )
+    metadata = cli.storage.AccountMetadata(
+        steamid64=STEAMID64,
+        account_name="fixture",
+        device_id="android:fixture",
+    )
+    calls = []
+
+    class FakeEnrollmentClient:
+        def add_authenticator(self, access_token, steamid64, account_name=None, device_id=None, sms_phone_id=None):
+            calls.append(("add", access_token, steamid64, account_name, device_id, sms_phone_id))
+            imported = cli.mafile.parse_mafile(
+                {
+                    "steamid": STEAMID64,
+                    "account_name": "fixture",
+                    "shared_secret": SHARED_SECRET,
+                    "identity_secret": IDENTITY_SECRET,
+                    "device_id": "android:fixture",
+                }
+            )
+            return cli.enrollment.AddAuthenticatorResult(imported=imported, raw={})
+
+        def finalize_authenticator(self, access_token, steamid64, shared_secret, activation_code, validate_sms_code=True):
+            calls.append(("finalize", access_token, steamid64, shared_secret, activation_code, validate_sms_code))
+
+    monkeypatch.setattr(cli, "_login_and_store", lambda account_name: (result, metadata))
+    monkeypatch.setattr(cli.enrollment, "EnrollmentClient", FakeEnrollmentClient)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"ADD AUTHENTICATOR {STEAMID64}\ny\n12345\n"))
+
+    assert cli.main(["enroll", "fixture"]) == 0
+
+    assert calls[0] == ("add", "access-token", STEAMID64, "fixture", "android:fixture", "1")
+    assert calls[-1] == ("finalize", "access-token", STEAMID64, SHARED_SECRET, "12345", True)
 
 def _patch_confirmation_context(monkeypatch, calls):
     target = Confirmation(

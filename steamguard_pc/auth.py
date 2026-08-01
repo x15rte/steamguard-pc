@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -13,6 +14,17 @@ from ._protobuf import Field, decode_message, encode_message, encode_nested
 AUTH_SERVICE_URL = "https://api.steampowered.com/IAuthenticationService/{method}/v1/"
 MOBILE_USER_AGENT = "okhttp/4.9.2"
 MOBILE_COOKIE = "mobileClient=android; mobileClientVersion=777777 3.10.3"
+MOBILE_API_HEADERS = {
+    "accept": "application/json, text/plain, */*",
+    "sec-fetch-site": "cross-site",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-dest": "empty",
+    "user-agent": MOBILE_USER_AGENT,
+    "cookie": MOBILE_COOKIE,
+}
+MOBILE_DEVICE_FRIENDLY_NAME = "Galaxy S25"
+OSTYPE_ANDROID_UNKNOWN = -500
+MOBILE_GAMING_DEVICE_TYPE = 528
 PLATFORM_MOBILE_APP = 3
 SESSION_PERSISTENT = 1
 TOKEN_RENEWAL_NONE = 0
@@ -169,6 +181,14 @@ def jwt_expiration(token: str) -> int | None:
         return None
 
 
+def web_login_from_access_token(steamid64: str, access_token: str, sessionid: str | None = None) -> WebLoginResult:
+    if not steamid64:
+        raise ValueError("steamid64 is required")
+    if not access_token:
+        raise ValueError("access_token is required")
+    sessionid = sessionid or generate_sessionid()
+    steam_login_secure = quote(f"{steamid64}||{access_token}", safe="")
+    return WebLoginResult(str(steamid64), steam_login_secure, sessionid)
 
 
 def generate_sessionid() -> str:
@@ -206,7 +226,6 @@ def encrypt_password(publickey_mod_hex: str, publickey_exp_hex: str, password: s
 class SteamAuthClient:
     def __init__(self, http: requests.Session | None = None) -> None:
         self.http = http or requests.Session()
-
 
     def finalize_web_login(
         self,
@@ -270,6 +289,7 @@ class SteamAuthClient:
             steam_refresh_secure=_cookie_value(self.http.cookies, "steamRefreshSecure", COMMUNITY_DOMAIN)
             or _cookie_value(self.http.cookies, "steamRefreshSecure"),
         )
+
     def get_rsa_key(self, account_name: str) -> dict[str, str]:
         request = encode_message([(1, "length", account_name)])
         payload = self._api_request("GetPasswordRSAPublicKey", request, _RSA_RESPONSE, method="GET")
@@ -293,11 +313,14 @@ class SteamAuthClient:
         device_details = encode_nested(
             9,
             [
-                (1, "length", "SteamGuardPC"),
+                (1, "length", MOBILE_DEVICE_FRIENDLY_NAME),
                 (2, "varint", PLATFORM_MOBILE_APP),
+                (3, "varint", OSTYPE_ANDROID_UNKNOWN),
+                (4, "varint", MOBILE_GAMING_DEVICE_TYPE),
             ],
         )
         fields: list[tuple[int, str, object]] = [
+            (1, "length", "SteamGuardPC"),
             (2, "length", account_name),
             (3, "length", encrypted_password),
             (4, "varint", int(rsa_key["timestamp"])),
@@ -421,7 +444,7 @@ class SteamAuthClient:
                 if not access_token:
                     access_token, _ = self.refresh_access_token(str(refresh_token))
                 steamid64 = auth_session.steamid64 or jwt_subject(str(refresh_token))
-                web_login = self.finalize_web_login(str(refresh_token), steamid64)
+                web_login = web_login_from_access_token(steamid64, str(access_token))
                 return LoginResult(
                     steamid64=steamid64,
                     account_name=str(payload["account_name"]) if payload.get("account_name") else account_name,
@@ -462,11 +485,10 @@ class SteamAuthClient:
         if method == "GET" and encoded:
             params["input_protobuf_encoded"] = encoded
 
-        headers = {
-            "accept": "application/json, text/plain, */*",
-            "user-agent": MOBILE_USER_AGENT,
-            "cookie": MOBILE_COOKIE,
-        }
+        if method == "GET" and "mobileClientVersion=" in MOBILE_COOKIE:
+            params["origin"] = "SteamMobile"
+
+        headers = dict(MOBILE_API_HEADERS)
         try:
             if method == "GET":
                 response = self.http.get(url, params=params, headers=headers, timeout=REQUEST_TIMEOUT)

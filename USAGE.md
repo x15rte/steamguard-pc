@@ -51,9 +51,12 @@ Flow:
 
 1. Sign in to Steam.
 2. Type `ADD AUTHENTICATOR <steamid64>`.
-3. SteamGuardPC stores the new authenticator secrets.
-4. Back up the displayed `R#####` revocation code.
-5. Enter Steam's email/SMS activation code.
+3. Answer whether the account has a verified SMS-capable phone number linked.
+4. SteamGuardPC stores the new authenticator secrets.
+5. Back up the displayed `R#####` revocation code.
+6. Enter Steam's email/SMS activation code.
+
+Answer `y` only when the account already has a verified SMS-capable phone number. Otherwise press Enter or answer `n`; SteamGuardPC omits `sms_phone_id` so Steam can use the no-phone/email path when available.
 
 If no activation code arrives, enter:
 

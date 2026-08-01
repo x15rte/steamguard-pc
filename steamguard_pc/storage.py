@@ -18,6 +18,7 @@ SECRET_FIELDS = {
     "revocation_code",
     "refresh_token",
     "access_token",
+    "access_token_obtained_at",
     "steamLoginSecure",
     "sessionid",
     "serial_number",

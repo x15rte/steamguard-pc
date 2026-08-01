@@ -16,30 +16,31 @@ MULTIAJAXOP_URL = f"{BASE_URL}/mobileconf/multiajaxop"
 REQUEST_TIMEOUT = 15
 MOBILE_HEADERS = {"X-Requested-With": "com.valvesoftware.android.steam.community"}
 AJAX_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
+BATCH_HEADERS = {"user-agent": "okhttp/4.9.2", "Origin": BASE_URL}
 LIST_ATTEMPTS = (
-    ("conf", "android", MOBILE_HEADERS),
+    ("conf", "react", {"user-agent": "okhttp/4.9.2"}),
     ("list", "react", {"user-agent": "okhttp/4.9.2"}),
 )
 ACCEPT_ATTEMPTS = (
-    ("allow", "android", AJAX_HEADERS),
     ("accept", "react", {"user-agent": "okhttp/4.9.2"}),
+    ("allow", "android", AJAX_HEADERS),
 )
 CANCEL_ATTEMPTS = (
-    ("cancel", "android", AJAX_HEADERS),
     ("reject", "react", {"user-agent": "okhttp/4.9.2"}),
+    ("cancel", "android", AJAX_HEADERS),
 )
 BATCH_ACCEPT_ATTEMPTS = (
-    ("allow", "react", {"user-agent": "okhttp/4.9.2"}),
-    ("accept", "react", {"user-agent": "okhttp/4.9.2"}),
+    ("allow", "react", BATCH_HEADERS),
+    ("accept", "react", BATCH_HEADERS),
 )
 BATCH_CANCEL_ATTEMPTS = (
-    ("cancel", "react", {"user-agent": "okhttp/4.9.2"}),
-    ("reject", "react", {"user-agent": "okhttp/4.9.2"}),
+    ("cancel", "react", BATCH_HEADERS),
+    ("reject", "react", BATCH_HEADERS),
 )
 DETAILS_ATTEMPTS = (
     ("detailspage/{confirmation_id}", "details", "react", {"user-agent": "okhttp/4.9.2"}),
     ("detailspage/{confirmation_id}", "detail", "react", {"user-agent": "okhttp/4.9.2"}),
-    ("details/{confirmation_id}", "details{confirmation_id}", "android", MOBILE_HEADERS),
+    ("details/{confirmation_id}", "details", "android", MOBILE_HEADERS),
 )
 INCORRECT_CODES_MESSAGE = "incorrect Steam Guard codes"
 
@@ -404,8 +405,8 @@ def respond_to_confirmations(
         attempts,
         extra_data={
             "op": op,
-            "cid": [item.id for item in confirmations],
-            "ck": [item.nonce for item in confirmations],
+            "cid[]": [item.id for item in confirmations],
+            "ck[]": [item.nonce for item in confirmations],
         },
         timestamp=timestamp,
     )

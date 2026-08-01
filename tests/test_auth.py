@@ -9,6 +9,7 @@ from steamguard_pc._protobuf import Field, decode_message, encode_message, encod
 
 
 STEAMID64 = "76561197960287930"
+ACCESS_TOKEN_COOKIE = f"{STEAMID64}%7C%7Caccess-token"
 
 def jwt_token(payload: dict) -> str:
     encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
@@ -51,7 +52,25 @@ def test_encrypt_password_returns_base64_ciphertext():
     assert len(base64.b64decode(encrypted)) == 128
 
 
-def test_login_with_credentials_finalizes_web_login_cookies(monkeypatch):
+def test_api_request_uses_mobile_headers_and_origin(requests_mock):
+    client = auth.SteamAuthClient()
+    url = auth.AUTH_SERVICE_URL.format(method="GetPasswordRSAPublicKey")
+    requests_mock.get(url, json={"response": {}}, headers={"content-type": "application/json"})
+    request_data = encode_message([(1, "length", "fixture")])
+
+    client._api_request("GetPasswordRSAPublicKey", request_data, {}, method="GET")
+
+    request = requests_mock.last_request
+    assert f"input_protobuf_encoded={base64.b64encode(request_data).decode('ascii')}" in request.url
+    assert "origin=SteamMobile" in request.url
+    assert request.headers["user-agent"] == auth.MOBILE_USER_AGENT
+    assert request.headers["cookie"] == auth.MOBILE_COOKIE
+    assert request.headers["sec-fetch-site"] == "cross-site"
+    assert request.headers["sec-fetch-mode"] == "cors"
+    assert request.headers["sec-fetch-dest"] == "empty"
+
+
+def test_login_with_credentials_uses_mobile_access_token_cookie(monkeypatch):
     client = auth.SteamAuthClient()
     calls = []
 
@@ -79,14 +98,8 @@ def test_login_with_credentials_finalizes_web_login_cookies(monkeypatch):
             }
         raise AssertionError(api_method)
 
-    def fake_finalize(refresh_token, steamid64, sessionid=None):
-        assert refresh_token == "refresh-token"
-        assert steamid64 == STEAMID64
-        assert sessionid is None
-        return auth.WebLoginResult(steamid64, "community-secure", "community-session")
-
+    monkeypatch.setattr(auth, "generate_sessionid", lambda: "community-session")
     monkeypatch.setattr(client, "_api_request", fake_api)
-    monkeypatch.setattr(client, "finalize_web_login", fake_finalize)
 
     result = client.login_with_credentials(
         "fixture",
@@ -100,7 +113,7 @@ def test_login_with_credentials_finalizes_web_login_cookies(monkeypatch):
     assert result.account_name == "fixture"
     assert result.refresh_token == "refresh-token"
     assert result.access_token == "access-token"
-    assert result.steam_login_secure == "community-secure"
+    assert result.steam_login_secure == ACCESS_TOKEN_COOKIE
     assert result.sessionid == "community-session"
     assert [call[0] for call in calls] == [
         "GetPasswordRSAPublicKey",

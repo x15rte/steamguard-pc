@@ -387,7 +387,7 @@ def _login_with_prompts(account_name: str | None = None) -> LoginResult:
 
 def _store_login_result(result: LoginResult) -> storage.AccountMetadata:
     storage.put_secret(result.steamid64, "refresh_token", result.refresh_token)
-    storage.put_secret(result.steamid64, "access_token", result.access_token)
+    session.save_access_token(result.steamid64, result.access_token)
     session.save_community_cookies(result.steamid64, result.steam_login_secure, result.sessionid)
 
     existing = storage.load_accounts().get(result.steamid64)
@@ -422,12 +422,16 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
     if input(f"Type {phrase!r} to continue: ") != phrase:
         raise ValueError("authenticator enrollment cancelled")
 
+    has_linked_phone = input("Have you linked a verified SMS-capable phone number to this Steam account? [y/N]: ").strip().casefold() == "y"
+    sms_phone_id = "1" if has_linked_phone else None
+
     client = enrollment.EnrollmentClient()
     add_result = client.add_authenticator(
         result.access_token,
         result.steamid64,
         account_name=result.account_name,
         device_id=metadata.device_id,
+        sms_phone_id=sms_phone_id,
     )
 
     imported = replace(
@@ -441,13 +445,18 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
     print("Authenticator secrets were stored before finalization.")
     if imported.revocation_code:
         _print_revocation_code(metadata, imported.revocation_code)
-    print("Steam may send the activation code by email or SMS. A phone number is not required when Steam offers its no-phone email path.")
+    if has_linked_phone:
+        print("Steam should send the activation code by SMS to the linked phone number.")
+    else:
+        print("Steam may send the activation code by email when it offers the no-phone path.")
     resend_phrase = f"SEND ACTIVATION EMAIL {result.steamid64}"
     print(f"If no code arrives, type {resend_phrase!r} instead of the code to ask Steam to email another activation code.")
     activation_code = input("Steam activation code from email or SMS: ").strip()
+    validate_sms_code = has_linked_phone
     if activation_code == resend_phrase:
         client.send_activation_email(result.access_token, result.steamid64)
         print("Requested an activation-code email from Steam.")
+        validate_sms_code = False
         activation_code = input("Steam activation code from email or SMS: ").strip()
     if not activation_code:
         raise ValueError("Steam activation code is required")
@@ -456,6 +465,7 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
         result.steamid64,
         imported.shared_secret,
         activation_code,
+        validate_sms_code=validate_sms_code,
     )
     print(f"Authenticator added and finalized for {metadata.account_name or metadata.steamid64} ({metadata.steamid64}).")
     if imported.revocation_code:

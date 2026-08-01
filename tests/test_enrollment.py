@@ -9,9 +9,11 @@ from steamguard_pc.enrollment import (
     FINALIZE_AUTHENTICATOR_URL,
     CREATE_EMERGENCY_CODES_URL,
     SEND_EMAIL_URL,
+    MOBILE_APP_USER_AGENT,
     AuthenticatorAlreadyPresentError,
     EnrollmentClient,
     EnrollmentError,
+    PhoneNumberRequiredError,
 )
 
 
@@ -60,12 +62,26 @@ def test_add_authenticator_returns_imported_guard(requests_mock):
     assert form["device_identifier"] == DEVICE_ID
     assert form["version"] == "2"
     assert "sms_phone_id" not in form
+    assert requests_mock.request_history[-1].headers["User-Agent"] == MOBILE_APP_USER_AGENT
+
+
+def test_add_authenticator_can_request_sms_phone_flow(requests_mock):
+    requests_mock.post(steam_time.QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
+    requests_mock.post(
+        ADD_AUTHENTICATOR_URL,
+        json={"response": {"status": 1, "shared_secret": SHARED_SECRET, "identity_secret": IDENTITY_SECRET}},
+    )
+
+    EnrollmentClient().add_authenticator("access-token", STEAMID64, "fixture", DEVICE_ID, sms_phone_id="1")
+
+    form = request_form(requests_mock.request_history[-1])
+    assert form["sms_phone_id"] == "1"
 
 
 @pytest.mark.parametrize(
     ("status", "exc"),
     [
-        (2, EnrollmentError),
+        (2, PhoneNumberRequiredError),
         (29, AuthenticatorAlreadyPresentError),
     ],
 )
@@ -88,6 +104,34 @@ def test_finalize_authenticator_sends_totp_and_activation_code(requests_mock):
     assert form["authenticator_code"] == steam_totp(SHARED_SECRET, 1700000000)
     assert form["authenticator_time"] == "1700000000"
     assert form["activation_code"] == "12345"
+    assert form["validate_sms_code"] == "1"
+
+
+def test_finalize_authenticator_uses_response_server_time_for_retry(requests_mock):
+    requests_mock.post(steam_time.QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
+    requests_mock.post(
+        FINALIZE_AUTHENTICATOR_URL,
+        [
+            {"json": {"response": {"success": False, "want_more": True, "status": 88, "server_time": 1700000090}}},
+            {"json": {"response": {"success": True, "want_more": False, "status": 1}}},
+        ],
+    )
+
+    EnrollmentClient().finalize_authenticator("access-token", STEAMID64, SHARED_SECRET, "12345")
+
+    finalize_forms = [request_form(request) for request in requests_mock.request_history if request.url.startswith(FINALIZE_AUTHENTICATOR_URL)]
+    assert [form["authenticator_time"] for form in finalize_forms] == ["1700000000", "1700000120"]
+    assert finalize_forms[1]["authenticator_code"] == steam_totp(SHARED_SECRET, 1700000120)
+
+
+
+def test_finalize_authenticator_can_skip_sms_validation_for_email_code(requests_mock):
+    requests_mock.post(steam_time.QUERY_TIME_URL, json={"response": {"server_time": 1700000000}})
+    requests_mock.post(FINALIZE_AUTHENTICATOR_URL, json={"response": {"success": True, "want_more": False, "status": 1}})
+
+    EnrollmentClient().finalize_authenticator("access-token", STEAMID64, SHARED_SECRET, "12345", validate_sms_code=False)
+
+    form = request_form(requests_mock.request_history[-1])
     assert "validate_sms_code" not in form
 
 
@@ -101,6 +145,7 @@ def test_send_activation_email_requests_activation_code(requests_mock):
     form = request_form(request)
     assert form["steamid"] == STEAMID64
     assert form["include_activation_code"] == "1"
+    assert form["email_type"] == "2"
 
 
 

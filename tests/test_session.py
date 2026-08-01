@@ -7,6 +7,8 @@ from steamguard_pc.session import SessionExpiredError, get_community_session, sa
 
 
 STEAMID64 = "76561197960287930"
+ACCESS_TOKEN_COOKIE = f"{STEAMID64}%7C%7Caccess-token"
+NEW_ACCESS_TOKEN_COOKIE = f"{STEAMID64}%7C%7Cnew-access-token"
 
 def jwt_token(payload: dict) -> str:
     encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
@@ -52,21 +54,21 @@ def test_get_community_session_refreshes_from_refresh_token_when_cookies_missing
             return "access-token", None
 
         def finalize_web_login(self, refresh_token, steamid64):
-            assert refresh_token == "refresh-token"
-            assert steamid64 == STEAMID64
-            return auth.WebLoginResult(steamid64, "secure-cookie", "session-cookie")
+            raise AssertionError("MobileApp session refresh should not call finalizelogin")
 
     monkeypatch.setattr(session_module.auth, "SteamAuthClient", FakeAuthClient)
+    monkeypatch.setattr(session_module.auth, "generate_sessionid", lambda: "session-cookie")
 
-    community_session = get_community_session(STEAMID64)
+    community_session = get_community_session(STEAMID64, now=1700000000)
 
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token")] == "access-token"
-    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:steamLoginSecure")] == "secure-cookie"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token_obtained_at")] == "1700000000"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:steamLoginSecure")] == ACCESS_TOKEN_COOKIE
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:sessionid")] == "session-cookie"
     cookies = {(cookie.name, cookie.domain): cookie.value for cookie in community_session.cookies}
-    assert cookies[("steamLoginSecure", "steamcommunity.com")] == "secure-cookie"
+    assert cookies[("steamLoginSecure", "steamcommunity.com")] == ACCESS_TOKEN_COOKIE
     assert cookies[("sessionid", "steamcommunity.com")] == "session-cookie"
-    assert cookies[("steamLoginSecure", ".steamcommunity.com")] == "secure-cookie"
+    assert cookies[("steamLoginSecure", ".steamcommunity.com")] == ACCESS_TOKEN_COOKIE
     assert cookies[("sessionid", ".steamcommunity.com")] == "session-cookie"
 
 
@@ -78,10 +80,11 @@ def test_refresh_auth_tokens_stores_renewed_tokens(keyring_store):
             assert refresh_token == "refresh-token"
             return "access-token", "new-refresh-token"
 
-    tokens = session_module.refresh_auth_tokens(STEAMID64, FakeAuthClient())
+    tokens = session_module.refresh_auth_tokens(STEAMID64, FakeAuthClient(), now=1700000000)
 
     assert tokens == ("access-token", "new-refresh-token")
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token")] == "access-token"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token_obtained_at")] == "1700000000"
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:refresh_token")] == "new-refresh-token"
 
 
@@ -95,18 +98,18 @@ def test_get_community_session_refreshes_before_access_token_expiry(monkeypatch,
             return "new-access-token", None
 
         def finalize_web_login(self, refresh_token, steamid64):
-            assert steamid64 == STEAMID64
-            return auth.WebLoginResult(STEAMID64, "fresh-secure", "fresh-session")
+            raise AssertionError("MobileApp session refresh should not call finalizelogin")
 
     monkeypatch.setattr(session_module.auth, "SteamAuthClient", FakeAuthClient)
+    monkeypatch.setattr(session_module.auth, "generate_sessionid", lambda: "fresh-session")
 
     community_session = get_community_session(STEAMID64, now=1700000000)
 
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token")] == "new-access-token"
-    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:steamLoginSecure")] == "fresh-secure"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:steamLoginSecure")] == NEW_ACCESS_TOKEN_COOKIE
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:sessionid")] == "fresh-session"
     cookies = {(cookie.name, cookie.domain): cookie.value for cookie in community_session.cookies}
-    assert cookies[("steamLoginSecure", "steamcommunity.com")] == "fresh-secure"
+    assert cookies[("steamLoginSecure", "steamcommunity.com")] == NEW_ACCESS_TOKEN_COOKIE
     assert cookies[("sessionid", "steamcommunity.com")] == "fresh-session"
 
 
@@ -121,21 +124,21 @@ def test_get_community_session_renews_refresh_token_when_refresh_token_near_expi
             return "new-access-token", "new-refresh-token"
 
         def finalize_web_login(self, refresh_token, steamid64):
-            assert refresh_token == "new-refresh-token"
-            assert steamid64 == STEAMID64
-            return auth.WebLoginResult(STEAMID64, "fresh-secure", "fresh-session")
+            raise AssertionError("MobileApp session refresh should not call finalizelogin")
 
     monkeypatch.setattr(session_module.auth, "SteamAuthClient", FakeAuthClient)
+    monkeypatch.setattr(session_module.auth, "generate_sessionid", lambda: "fresh-session")
 
     get_community_session(STEAMID64, now=1700000000)
 
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:refresh_token")] == "new-refresh-token"
 
 
-def test_get_community_session_keeps_valid_cookies_when_token_expiry_unknown(monkeypatch, keyring_store):
+def test_get_community_session_keeps_fresh_opaque_access_token_cookies(monkeypatch, keyring_store):
     save_community_cookies(STEAMID64, "secure-cookie", "session-cookie")
     storage.put_secret(STEAMID64, "access_token", "opaque-access-token")
     storage.put_secret(STEAMID64, "refresh_token", "opaque-refresh-token")
+    storage.put_secret(STEAMID64, "access_token_obtained_at", "1699999700")
 
     class FakeAuthClient:
         def __init__(self):
@@ -148,3 +151,30 @@ def test_get_community_session_keeps_valid_cookies_when_token_expiry_unknown(mon
     cookies = {(cookie.name, cookie.domain): cookie.value for cookie in community_session.cookies}
     assert cookies[("steamLoginSecure", "steamcommunity.com")] == "secure-cookie"
     assert cookies[("sessionid", "steamcommunity.com")] == "session-cookie"
+
+
+def test_get_community_session_refreshes_old_opaque_access_token(monkeypatch, keyring_store):
+    save_community_cookies(STEAMID64, "secure-cookie", "session-cookie")
+    storage.put_secret(STEAMID64, "access_token", "opaque-access-token")
+    storage.put_secret(STEAMID64, "access_token_obtained_at", "1699999399")
+    storage.put_secret(STEAMID64, "refresh_token", "opaque-refresh-token")
+
+    class FakeAuthClient:
+        def refresh_access_token(self, refresh_token):
+            assert refresh_token == "opaque-refresh-token"
+            return "new-access-token", None
+
+        def finalize_web_login(self, refresh_token, steamid64):
+            raise AssertionError("MobileApp session refresh should not call finalizelogin")
+
+    monkeypatch.setattr(session_module.auth, "SteamAuthClient", FakeAuthClient)
+    monkeypatch.setattr(session_module.auth, "generate_sessionid", lambda: "fresh-session")
+
+    community_session = get_community_session(STEAMID64, now=1700000000)
+
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token")] == "new-access-token"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token_obtained_at")] == "1700000000"
+    assert keyring_store[(storage.SERVICE, f"{STEAMID64}:steamLoginSecure")] == NEW_ACCESS_TOKEN_COOKIE
+    cookies = {(cookie.name, cookie.domain): cookie.value for cookie in community_session.cookies}
+    assert cookies[("steamLoginSecure", "steamcommunity.com")] == NEW_ACCESS_TOKEN_COOKIE
+    assert cookies[("sessionid", "steamcommunity.com")] == "fresh-session"
