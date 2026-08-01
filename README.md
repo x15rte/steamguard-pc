@@ -123,7 +123,7 @@ Revocation codes are excluded by default. Include them only for private offline 
 steamguard-pc export-backup C:\private\steamguard.sgbak --include-revocation-code
 ```
 
-Use `--force` to overwrite an existing backup. Use `import-backup --replace` to import over matching local accounts.
+Use `--force` to overwrite an existing backup. During import, new accounts are added automatically and existing matching accounts prompt before overwrite. Each imported account name and SteamID is printed. Use `import-backup --replace` only to overwrite all matches without per-account prompts.
 
 ### Revocation, removal, and recovery codes
 
@@ -161,7 +161,7 @@ Run `steamguard-pc COMMAND -h` for command-specific options.
 | `cookie-guide` | Show browser steps for copying Steam Community cookies. |
 | `set-cookies STEAMID64` | Store `steamLoginSecure` and `sessionid` from environment variables or hidden prompts. |
 | `export-backup PATH [STEAMID64 ...] [--force] [--include-revocation-code]` | Export selected accounts to an encrypted backup. |
-| `import-backup PATH [--replace]` | Import accounts from an encrypted steamguard-pc backup. |
+| `import-backup PATH [--replace]` | Import accounts from an encrypted steamguard-pc backup; prompts before overwriting matching local accounts unless `--replace` is used. |
 | `revocation-code STEAMID64` | Reveal the stored authenticator revocation code. |
 | `remove-authenticator STEAMID64` | Remove the Steam mobile authenticator and delete local authenticator secrets. |
 | `recovery-codes STEAMID64` | Create and print one-time Steam backup/recovery codes; requires account phone/SMS confirmation. |

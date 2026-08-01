@@ -1,7 +1,7 @@
 import base64
 import json
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from json import JSONDecodeError
 from pathlib import Path
@@ -379,23 +379,35 @@ def _account_from_backup(raw: object) -> tuple[AccountMetadata, dict[str, str]]:
     return metadata, secrets
 
 
-def import_accounts(path: str | Path, passphrase: str, replace: bool = False) -> int:
+def import_accounts(
+    path: str | Path,
+    passphrase: str,
+    replace: bool = False,
+    should_overwrite_account: Callable[[AccountMetadata], bool] | None = None,
+    on_imported_account: Callable[[AccountMetadata], None] | None = None,
+) -> int:
     _validate_passphrase(passphrase)
 
     plain = _decrypt_plaintext(path, passphrase)
     imported = [_account_from_backup(account) for account in plain["accounts"]]
 
     existing = storage.load_accounts()
-    if not replace:
-        for metadata, _ in imported:
-            if metadata.steamid64 in existing:
+    imported_count = 0
+    for metadata, secrets in imported:
+        if metadata.steamid64 in existing and not replace:
+            if should_overwrite_account is None:
                 raise BackupError(
                     f"account {metadata.steamid64} already exists; rerun with --replace to overwrite it"
                 )
+            if not should_overwrite_account(metadata):
+                continue
 
-    for metadata, secrets in imported:
         for field, value in secrets.items():
             storage.put_secret(metadata.steamid64, field, value)
         storage.upsert_account(metadata)
+        existing[metadata.steamid64] = metadata
+        imported_count += 1
+        if on_imported_account is not None:
+            on_imported_account(metadata)
 
-    return len(imported)
+    return imported_count

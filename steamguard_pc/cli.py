@@ -401,6 +401,23 @@ def _selected_backup_ids(steamid64s: list[str]) -> list[str]:
     return selected_ids
 
 
+def _backup_account_label(metadata: storage.AccountMetadata) -> str:
+    if metadata.account_name:
+        return f"{metadata.account_name} ({metadata.steamid64})"
+    return metadata.steamid64
+
+
+def _confirm_backup_overwrite(metadata: storage.AccountMetadata) -> bool:
+    label = _backup_account_label(metadata)
+    answer = input(
+        _prompt(f"Account {label} already exists. Overwrite with backup values? [y/N]: ")
+    ).strip().casefold()
+    if answer in {"y", "yes"}:
+        return True
+    print(_warning(f"Skipped existing account {label}."))
+    return False
+
+
 def _confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str, requests.Session]:
     metadata = _account_metadata(steamid64)
     identity_secret = storage.get_required_secret(steamid64, "identity_secret")
@@ -825,7 +842,7 @@ def _cmd_import_backup(args: argparse.Namespace) -> int:
     if args.replace:
         print(_warning("Existing matching accounts will be overwritten with values from the backup."))
     else:
-        print(_muted("Existing accounts are refused unless --replace is used."))
+        print(_muted("New accounts will be imported; existing matching accounts will ask before overwrite."))
     if input(_prompt("Type 'IMPORT BACKUP' to import encrypted backup: ")) != "IMPORT BACKUP":
         print(_warning("Backup import cancelled."))
         return 1
@@ -833,7 +850,16 @@ def _cmd_import_backup(args: argparse.Namespace) -> int:
     passphrase = getpass.getpass(_prompt("Backup passphrase: "))
     if not passphrase:
         raise ValueError("backup passphrase is required")
-    count = backup.import_accounts(args.path, passphrase, replace=args.replace)
+    imported_accounts: list[storage.AccountMetadata] = []
+    count = backup.import_accounts(
+        args.path,
+        passphrase,
+        replace=args.replace,
+        should_overwrite_account=None if args.replace else _confirm_backup_overwrite,
+        on_imported_account=imported_accounts.append,
+    )
+    for metadata in imported_accounts:
+        print(_success(f"Imported {_backup_account_label(metadata)}."))
     print(_success(f"Imported encrypted backup for {count} account(s)."))
     return 0
 
@@ -1463,7 +1489,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=_HelpFormatter,
     )
     import_backup.add_argument("path", metavar="PATH", help="Encrypted steamguard-pc backup file path.")
-    import_backup.add_argument("--replace", action="store_true", help="Overwrite matching accounts already stored locally.")
+    import_backup.add_argument("--replace", action="store_true", help="Overwrite matching accounts without per-account prompts.")
     import_backup.set_defaults(func=_cmd_import_backup)
 
     code = subparsers.add_parser(

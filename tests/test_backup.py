@@ -8,6 +8,7 @@ from steamguard_pc.models import AccountMetadata
 
 
 STEAMID64 = "76561197960287930"
+OTHER_STEAMID64 = "76561197960287931"
 SHARED_SECRET = "MDEyMzQ1Njc4OWFiY2RlZmdoaWo="
 IDENTITY_SECRET = "aWRlbnRpdHktc2VjcmV0LTEyMzQ="
 REVOCATION_CODE = "REVOCATION_CODE"
@@ -136,6 +137,53 @@ def test_import_backup_refuses_existing_account_without_replace(monkeypatch, tmp
         backup.import_accounts(path, PASSPHRASE)
 
     assert str(excinfo.value) == f"account {STEAMID64} already exists; rerun with --replace to overwrite it"
+
+
+def test_import_backup_conflict_callback_can_skip_existing_and_import_new(monkeypatch, tmp_path, keyring_store):
+    _use_fast_kdf(monkeypatch)
+    metadata = _seed_account()
+    other_metadata = AccountMetadata(
+        steamid64=OTHER_STEAMID64,
+        account_name="other",
+        device_id="android:other",
+        last_imported_at="2026-07-31T00:00:00Z",
+    )
+    storage.upsert_account(other_metadata)
+    storage.put_secret(OTHER_STEAMID64, "shared_secret", SHARED_SECRET)
+    storage.put_secret(OTHER_STEAMID64, "identity_secret", IDENTITY_SECRET)
+    path = tmp_path / "steamguard.sgbak"
+    backup.export_accounts(path, PASSPHRASE)
+
+    local_metadata = AccountMetadata(
+        steamid64=STEAMID64,
+        account_name="local",
+        device_id="android:local",
+        last_imported_at="2026-08-01T00:00:00Z",
+    )
+    keyring_store.clear()
+    storage.save_accounts({STEAMID64: local_metadata})
+    storage.put_secret(STEAMID64, "shared_secret", "LOCAL_SHARED_SECRET")
+    prompted: list[AccountMetadata] = []
+    imported: list[AccountMetadata] = []
+
+    def skip_existing(account: AccountMetadata) -> bool:
+        prompted.append(account)
+        return False
+
+    assert backup.import_accounts(
+        path,
+        PASSPHRASE,
+        should_overwrite_account=skip_existing,
+        on_imported_account=imported.append,
+    ) == 1
+
+    accounts = storage.load_accounts()
+    assert prompted == [metadata]
+    assert imported == [other_metadata]
+    assert accounts[STEAMID64] == local_metadata
+    assert accounts[OTHER_STEAMID64] == other_metadata
+    assert storage.get_secret(STEAMID64, "shared_secret") == "LOCAL_SHARED_SECRET"
+    assert storage.get_secret(OTHER_STEAMID64, "shared_secret") == SHARED_SECRET
 
 
 def test_export_backup_refuses_overwrite_without_force(monkeypatch, tmp_path, keyring_store):

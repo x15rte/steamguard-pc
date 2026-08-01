@@ -540,6 +540,7 @@ def test_import_backup_restores_from_cli(monkeypatch, tmp_path, keyring_store, c
     assert cli.main(["import-backup", str(path)]) == 0
 
     output = capsys.readouterr().out
+    assert f"Imported fixture ({STEAMID64})." in output
     assert "Imported encrypted backup for 1 account(s)." in output
     assert cli.storage.load_accounts()[STEAMID64] == metadata
     assert cli.storage.get_secret(STEAMID64, "shared_secret") == SHARED_SECRET
@@ -548,6 +549,37 @@ def test_import_backup_restores_from_cli(monkeypatch, tmp_path, keyring_store, c
     for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE, passphrase]:
         assert secret not in output
 
+
+def test_import_backup_prompts_before_overwriting_existing_account(monkeypatch, tmp_path, keyring_store, capsys):
+    metadata = _seed_cli_backup_account()
+    path = tmp_path / "steamguard.sgbak"
+    passphrase = "correct horse battery staple"
+    monkeypatch.setattr(cli.backup, "KDF_MEMORY_COST", 8 * cli.backup.KDF_LANES)
+    monkeypatch.setattr(cli.backup, "KDF_ITERATIONS", 1)
+    cli.backup.export_accounts(path, passphrase)
+
+    local_metadata = AccountMetadata(
+        steamid64=STEAMID64,
+        account_name="local",
+        device_id="android:local",
+        last_imported_at="2026-08-01T00:00:00Z",
+    )
+    keyring_store.clear()
+    cli.storage.save_accounts({STEAMID64: local_metadata})
+    cli.storage.put_secret(STEAMID64, "shared_secret", "LOCAL_SHARED_SECRET")
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: passphrase)
+    monkeypatch.setattr("sys.stdin", io.StringIO("IMPORT BACKUP\ny\n"))
+
+    assert cli.main(["import-backup", str(path)]) == 0
+
+    output = capsys.readouterr().out
+    assert f"Account fixture ({STEAMID64}) already exists. Overwrite with backup values?" in output
+    assert "Imported encrypted backup for 1 account(s)." in output
+    assert f"Imported fixture ({STEAMID64})." in output
+    assert cli.storage.load_accounts()[STEAMID64] == metadata
+    assert cli.storage.get_secret(STEAMID64, "shared_secret") == SHARED_SECRET
+    for secret in [SHARED_SECRET, IDENTITY_SECRET, REVOCATION_CODE, passphrase, "LOCAL_SHARED_SECRET"]:
+        assert secret not in output
 
 def test_import_backup_refuses_wrong_phrase(monkeypatch, tmp_path, capsys):
     def import_accounts(*args, **kwargs):
