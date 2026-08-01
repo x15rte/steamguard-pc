@@ -263,8 +263,10 @@ def test_recovery_codes_requests_confirmation_and_prints_codes(monkeypatch, keyr
     assert cli.main(["recovery-codes", STEAMID64]) == 0
 
     output = capsys.readouterr().out
-    assert "Steam recovery codes are one-time login codes for official Steam recovery prompts." in output
+    assert "Steam recovery codes are one-time backup login codes for official Steam recovery prompts." in output
+    assert "Steam requires a phone number on this account and confirms recovery-code creation by SMS, not email." in output
     assert "Creating a new set may replace older emergency codes. Store the new set offline immediately." in output
+    assert "Steam recovery-code SMS confirmation code sent to the account phone number:" in output
     assert f"Steam recovery codes for fixture ({STEAMID64}):" in output
     assert "12345678" in output
     assert "87654321" in output
@@ -1483,6 +1485,16 @@ def test_help_command_prints_command_help(capsys):
     output = capsys.readouterr().out
     assert "usage: steamguard-pc code" in output
     assert "--steam-time" in output
+
+
+def test_recovery_codes_help_mentions_phone_sms(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["recovery-codes", "-h"])
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out
+    assert "requires a phone number" in output
+    assert "verifies this action by SMS, not email" in output
 
 
 def test_help_command_suggests_unknown_command(capsys):

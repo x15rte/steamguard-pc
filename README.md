@@ -135,7 +135,7 @@ steamguard-pc recovery-codes STEAMID64
 
 - `revocation-code` reveals the stored Steam `R#####` authenticator-removal code after exact typed consent.
 - `remove-authenticator` asks Steam to remove the mobile authenticator with the stored revocation code, then deletes local authenticator secrets while keeping local sign-in/session tokens.
-- `recovery-codes` creates one-time Steam recovery codes, prints them once, and does not store them. (require phone number)
+- `recovery-codes` creates one-time Steam backup/recovery codes, prints them once, and does not store them. Steam requires a phone number bound to the account and verifies this action by SMS, not email.
 
 ## Command reference
 
@@ -164,7 +164,7 @@ Run `steamguard-pc COMMAND -h` for command-specific options.
 | `import-backup PATH [--replace]` | Import accounts from an encrypted steamguard-pc backup. |
 | `revocation-code STEAMID64` | Reveal the stored authenticator revocation code. |
 | `remove-authenticator STEAMID64` | Remove the Steam mobile authenticator and delete local authenticator secrets. |
-| `recovery-codes STEAMID64` | Create and print one-time Steam recovery codes. |
+| `recovery-codes STEAMID64` | Create and print one-time Steam backup/recovery codes; requires account phone/SMS confirmation. |
 | `completion {bash,zsh,powershell}` | Print a shell completion script. |
 | `help [COMMAND]` | Show top-level or command-specific help. |
 

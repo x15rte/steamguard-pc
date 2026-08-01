@@ -971,7 +971,8 @@ def _cmd_recovery_codes(args: argparse.Namespace) -> int:
     if metadata is None:
         raise KeyError(f"missing account metadata for {args.steamid64}")
     label = _account_label(metadata)
-    print(_info("Steam recovery codes are one-time login codes for official Steam recovery prompts."))
+    print(_info("Steam recovery codes are one-time backup login codes for official Steam recovery prompts."))
+    print(_warning("Steam requires a phone number on this account and confirms recovery-code creation by SMS, not email."))
     print(_warning("Creating a new set may replace older emergency codes. Store the new set offline immediately."))
     expected = f"CREATE RECOVERY CODES {args.steamid64}"
     if input(_prompt(f"Type {expected!r} to create recovery codes: ")) != expected:
@@ -982,7 +983,7 @@ def _cmd_recovery_codes(args: argparse.Namespace) -> int:
     client = enrollment.EnrollmentClient()
     codes = client.create_emergency_codes(access_token)
     if codes is None:
-        confirmation_code = input(_prompt("Steam recovery-code confirmation code from email or SMS: ")).strip()
+        confirmation_code = input(_prompt("Steam recovery-code SMS confirmation code sent to the account phone number: ")).strip()
         if not confirmation_code:
             raise ValueError("Steam recovery-code confirmation code is required")
         codes = client.create_emergency_codes(access_token, confirmation_code)
@@ -1555,10 +1556,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     recovery_codes = subparsers.add_parser(
         "recovery-codes",
-        help="Create one-time Steam recovery codes.",
+        help="Create Steam backup codes; requires phone/SMS confirmation.",
         description=(
-            "Create one-time Steam recovery codes after exact typed consent;\n"
-            "Steam may require an email or SMS confirmation code."
+            "Create one-time Steam backup/recovery codes after exact typed consent.\n"
+            "Steam requires a phone number on the account and verifies this action by SMS, not email."
         ),
         formatter_class=_HelpFormatter,
     )
