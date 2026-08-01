@@ -40,7 +40,7 @@ steamguard-pc completion powershell
 
 For Bash or Zsh, use `steamguard-pc completion bash` or `steamguard-pc completion zsh`.
 Pressing Ctrl+C during an interactive prompt exits cleanly without a traceback.
-Colored output is automatic on terminals; use `--color always`, `--color never`, or `--no-color` to override detection.
+Status, warning, destructive-action, prompt, and field-label output is color-coded automatically on terminals; use `--color always`, `--color never`, or `--no-color` to override detection.
 
 ## Quick start
 

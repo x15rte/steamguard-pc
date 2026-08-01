@@ -37,6 +37,25 @@ def test_code_plain_prints_only_code(monkeypatch, capsys):
     assert capsys.readouterr().out == "CX2MR\n"
 
 
+def test_color_always_colors_runtime_messages(monkeypatch, capsys):
+    monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: SHARED_SECRET)
+
+    assert cli.main(["--color", "always", "code", STEAMID64, "--timestamp", "0"]) == 0
+
+    output = capsys.readouterr().out
+    assert "\033[" in output
+    assert "CX2MR" in output
+    assert "Clock must be synchronized" in output
+
+
+def test_plain_code_stays_uncolored_for_copying(monkeypatch, capsys):
+    monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: SHARED_SECRET)
+
+    assert cli.main(["--color", "always", "code", STEAMID64, "--timestamp", "0", "--plain"]) == 0
+
+    assert capsys.readouterr().out == "CX2MR\n"
+
+
 def test_code_steam_time_uses_query_time(monkeypatch, capsys):
     monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: SHARED_SECRET)
     monkeypatch.setattr(cli.steam_time, "query_steam_time", lambda: 30)

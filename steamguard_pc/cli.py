@@ -47,8 +47,14 @@ Treat both values like passwords. Do not paste them into chat, logs, screenshots
 
 ANSI_RESET = "\033[0m"
 COLOR_HEADING = "1;36"
+COLOR_INFO = "36"
+COLOR_SUCCESS = "32"
+COLOR_WARNING = "33"
 COLOR_ERROR = "1;31"
 COLOR_INTERRUPT = "1;33"
+COLOR_LABEL = "1"
+COLOR_VALUE = "1;36"
+COLOR_MUTED = "2"
 COLOR_MODES = {"auto", "always", "never"}
 _COLOR_MODE: str | None = None
 
@@ -87,6 +93,39 @@ def _color(text: str, code: str, stream) -> str:
     if not _color_enabled(stream):
         return text
     return f"\033[{code}m{text}{ANSI_RESET}"
+
+
+def _info(text: str) -> str:
+    return _color(text, COLOR_INFO, sys.stdout)
+
+
+def _success(text: str) -> str:
+    return _color(text, COLOR_SUCCESS, sys.stdout)
+
+
+def _warning(text: str, stream=None) -> str:
+    target = sys.stdout if stream is None else stream
+    return _color(text, COLOR_WARNING, target)
+
+
+def _danger(text: str) -> str:
+    return _color(text, COLOR_ERROR, sys.stdout)
+
+
+def _label(text: str) -> str:
+    return _color(text, COLOR_LABEL, sys.stdout)
+
+
+def _value(text: str) -> str:
+    return _color(text, COLOR_VALUE, sys.stdout)
+
+
+def _muted(text: str) -> str:
+    return _color(text, COLOR_MUTED, sys.stdout)
+
+
+def _prompt(text: str) -> str:
+    return _color(text, COLOR_LABEL, sys.stdout)
 
 
 class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -247,7 +286,7 @@ def _print_confirmation_row(confirmation: Confirmation) -> None:
     print(
         "\t".join(
             [
-                confirmation.id,
+                _value(confirmation.id),
                 _confirmation_type(confirmation),
                 confirmation.creator_id or "-",
                 confirmation.headline or "-",
@@ -259,12 +298,12 @@ def _print_confirmation_row(confirmation: Confirmation) -> None:
 
 def _print_confirmation_detail(confirmation: Confirmation, account_label: str | None = None) -> None:
     if account_label is not None:
-        print(f"account: {account_label}")
-    print(f"id: {confirmation.id}")
-    print(f"type: {_confirmation_type(confirmation)}")
-    print(f"creator_id: {confirmation.creator_id or '-'}")
-    print(f"headline: {confirmation.headline or '-'}")
-    print(f"summary: {_summary_text(confirmation.summary)}")
+        print(f"{_label('account:')} {account_label}")
+    print(f"{_label('id:')} {_value(confirmation.id)}")
+    print(f"{_label('type:')} {_confirmation_type(confirmation)}")
+    print(f"{_label('creator_id:')} {confirmation.creator_id or '-'}")
+    print(f"{_label('headline:')} {confirmation.headline or '-'}")
+    print(f"{_label('summary:')} {_summary_text(confirmation.summary)}")
 
 def _parse_client_id(value: str) -> int:
     if not value.isdecimal():
@@ -300,7 +339,7 @@ def _print_login_confirmation_row(confirmation: auth.LoginConfirmation) -> None:
     print(
         "\t".join(
             [
-                str(confirmation.client_id),
+                _value(str(confirmation.client_id)),
                 confirmation.ip or "-",
                 _login_location_text(confirmation),
                 _login_platform_text(confirmation.platform_type),
@@ -323,17 +362,17 @@ def _requested_persistence_text(value: int | None) -> str:
 
 
 def _print_login_confirmation_detail(metadata: storage.AccountMetadata, confirmation: auth.LoginConfirmation) -> None:
-    print(f"account: {_account_label(metadata)}")
-    print(f"client_id: {confirmation.client_id}")
-    print(f"ip: {confirmation.ip or '-'}")
-    print(f"location: {_login_location_text(confirmation)}")
-    print(f"geoloc: {confirmation.geoloc or '-'}")
-    print(f"platform: {_login_platform_text(confirmation.platform_type)}")
-    print(f"device: {confirmation.device_friendly_name or '-'}")
-    print(f"login_history: {_login_history_text(confirmation.login_history)}")
-    print(f"requested_persistence: {_requested_persistence_text(confirmation.requested_persistence)}")
-    print(f"location_mismatch: {_yes_no(confirmation.location_mismatch)}")
-    print(f"high_usage_login: {_yes_no(confirmation.high_usage_login)}")
+    print(f"{_label('account:')} {_account_label(metadata)}")
+    print(f"{_label('client_id:')} {_value(str(confirmation.client_id))}")
+    print(f"{_label('ip:')} {confirmation.ip or '-'}")
+    print(f"{_label('location:')} {_login_location_text(confirmation)}")
+    print(f"{_label('geoloc:')} {confirmation.geoloc or '-'}")
+    print(f"{_label('platform:')} {_login_platform_text(confirmation.platform_type)}")
+    print(f"{_label('device:')} {confirmation.device_friendly_name or '-'}")
+    print(f"{_label('login_history:')} {_login_history_text(confirmation.login_history)}")
+    print(f"{_label('requested_persistence:')} {_requested_persistence_text(confirmation.requested_persistence)}")
+    print(f"{_label('location_mismatch:')} {_yes_no(confirmation.location_mismatch)}")
+    print(f"{_label('high_usage_login:')} {_yes_no(confirmation.high_usage_login)}")
 
 
 def _print_trade_offer_id(
@@ -354,7 +393,7 @@ def _print_trade_offer_id(
         trade_offer_id = confirmations.trade_offer_id_from_details_html(html)
     except (ConfirmationError, steam_time.SteamTimeError):
         trade_offer_id = None
-    print(f"trade_offer_id: {trade_offer_id or 'unavailable'}")
+    print(f"{_label('trade_offer_id:')} {trade_offer_id or 'unavailable'}")
 
 def _print_batch_confirmation_review(
     metadata: storage.AccountMetadata,
@@ -364,9 +403,9 @@ def _print_batch_confirmation_review(
 ) -> None:
     account_label = _account_label(metadata)
     count = len(confirmations_to_review)
-    print(f"Pending confirmations for {account_label}: {count}")
+    print(_info(f"Pending confirmations for {account_label}: {count}"))
     for index, confirmation in enumerate(confirmations_to_review, start=1):
-        print(f"--- confirmation {index} of {count} ---")
+        print(_muted(f"--- confirmation {index} of {count} ---"))
         _print_confirmation_detail(confirmation, account_label)
         _print_trade_offer_id(
             community_session,
@@ -459,17 +498,17 @@ def _cookie_values_from_env() -> tuple[str | None, str | None]:
 
 
 def _print_cookie_guide() -> None:
-    print(COOKIE_GUIDE.strip())
+    print(_info(COOKIE_GUIDE.strip()))
 
 
 def _import_mafile_path(path: str | Path) -> tuple[mafile.ImportedSteamGuard, storage.AccountMetadata]:
     for warning in mafile.unsafe_import_path_warnings(path):
-        print(f"Warning: {warning}", file=sys.stderr)
+        print(_warning(f"Warning: {warning}", sys.stderr), file=sys.stderr)
 
     try:
         imported = mafile.load_mafile(path)
     except mafile.EncryptedMaFileRequiresPasskey:
-        passkey = getpass.getpass("SDA encryption passkey: ")
+        passkey = getpass.getpass(_prompt("SDA encryption passkey: "))
         if not passkey:
             raise ValueError("SDA encryption passkey is required")
         try:
@@ -478,9 +517,9 @@ def _import_mafile_path(path: str | Path) -> tuple[mafile.ImportedSteamGuard, st
             passkey = ""
     metadata = storage.store_imported_guard(imported)
     label = metadata.account_name or metadata.steamid64
-    print(f"Imported {label} ({metadata.steamid64})")
+    print(_success(f"Imported {label} ({metadata.steamid64})"))
     if imported.revocation_code:
-        print(f"Steam Guard revocation code was stored. Run `steamguard-pc revocation-code {metadata.steamid64}` in a private terminal and store it offline.")
+        print(_warning(f"Steam Guard revocation code was stored. Run `steamguard-pc revocation-code {metadata.steamid64}` in a private terminal and store it offline."))
     return imported, metadata
 
 
@@ -490,11 +529,11 @@ def _select_mafile_path(explicit_path: str | None) -> Path:
 
     candidates = mafile.find_mafile_candidates()
     if candidates:
-        print("Found .maFile candidates:")
+        print(_info("Found .maFile candidates:"))
         for index, candidate in enumerate(candidates, start=1):
-            print(f"  {index}. {candidate}")
-        print("Choose a number, type another path, or press Enter to cancel.")
-        choice = input("maFile: ").strip()
+            print(f"  {_value(str(index))}. {candidate}")
+        print(_muted("Choose a number, type another path, or press Enter to cancel."))
+        choice = input(_prompt("maFile: ")).strip()
         if not choice:
             raise ValueError("setup cancelled before import")
         if choice.isdecimal():
@@ -503,8 +542,8 @@ def _select_mafile_path(explicit_path: str | None) -> Path:
                 return candidates[selected - 1]
         return Path(choice)
 
-    print("No .maFile files found in common locations.")
-    choice = input("Path to .maFile (blank to cancel): ").strip()
+    print(_warning("No .maFile files found in common locations."))
+    choice = input(_prompt("Path to .maFile (blank to cancel): ")).strip()
     if not choice:
         raise ValueError("setup cancelled before import")
     return Path(choice)
@@ -520,57 +559,57 @@ def _store_cookies_from_env(steamid64: str) -> bool:
         return False
 
     session.save_community_cookies(steamid64, steam_login_secure, sessionid)
-    print(f"Stored Steam Community cookies for {steamid64} from environment variables.")
+    print(_success(f"Stored Steam Community cookies for {steamid64} from environment variables."))
     return True
 
 
 def _setup_cookies(steamid64: str, imported_had_cookies: bool, skip_cookies: bool) -> None:
     if skip_cookies:
-        print("Skipped cookie setup. Run `steamguard-pc cookie-guide` then `steamguard-pc set-cookies` when needed.")
+        print(_warning("Skipped cookie setup. Run `steamguard-pc cookie-guide` then `steamguard-pc set-cookies` when needed."))
         return
 
     if _store_cookies_from_env(steamid64):
         return
 
     if imported_had_cookies:
-        print("Steam Community cookies were imported from the .maFile.")
-        print(f"If confirmations fail, refresh them with `steamguard-pc set-cookies {steamid64}`.")
+        print(_success("Steam Community cookies were imported from the .maFile."))
+        print(_muted(f"If confirmations fail, refresh them with `steamguard-pc set-cookies {steamid64}`."))
         return
 
     _print_cookie_guide()
-    if input("Store Steam Community cookies now? [y/N]: ").strip().casefold() != "y":
-        print(f"Skipped cookie setup. Run `steamguard-pc set-cookies {steamid64}` before confirmations.")
+    if input(_prompt("Store Steam Community cookies now? [y/N]: ")).strip().casefold() != "y":
+        print(_warning(f"Skipped cookie setup. Run `steamguard-pc set-cookies {steamid64}` before confirmations."))
         return
 
-    steam_login_secure = getpass.getpass("steamLoginSecure: ")
-    sessionid = getpass.getpass("sessionid: ")
+    steam_login_secure = getpass.getpass(_prompt("steamLoginSecure: "))
+    sessionid = getpass.getpass(_prompt("sessionid: "))
     session.save_community_cookies(steamid64, steam_login_secure, sessionid)
-    print(f"Stored Steam Community cookies for {steamid64}.")
+    print(_success(f"Stored Steam Community cookies for {steamid64}."))
 
 
 def _code_for_login(action: GuardAction, auth_session: auth.AuthSession) -> str | None:
     if action.type == auth.GUARD_DEVICE_CODE and auth_session.steamid64:
         shared_secret = storage.get_secret(auth_session.steamid64, "shared_secret")
         if shared_secret:
-            print(f"Using stored Steam Guard code for {auth_session.steamid64}.")
+            print(_info(f"Using stored Steam Guard code for {auth_session.steamid64}."))
             return steam_totp(shared_secret)
 
     detail = f" ({action.message})" if action.message else ""
-    return input(f"Steam Guard {action.label}{detail}: ").strip()
+    return input(_prompt(f"Steam Guard {action.label}{detail}: ")).strip()
 
 
 def _wait_for_login_confirmation(actions: list[GuardAction]) -> None:
     labels = ", ".join(action.label for action in actions)
-    print(f"Approve the Steam login prompt using: {labels}.")
-    input("Press Enter after approving it.")
+    print(_info(f"Approve the Steam login prompt using: {labels}."))
+    input(_prompt("Press Enter after approving it."))
 
 
 def _login_with_prompts(account_name: str | None = None) -> LoginResult:
-    account_name = account_name or input("Steam account name: ").strip()
+    account_name = account_name or input(_prompt("Steam account name: ")).strip()
     if not account_name:
         raise ValueError("Steam account name is required")
-    password = getpass.getpass("Steam password: ")
-    print("Signing in with Steam. Password is sent only to Steam over HTTPS.")
+    password = getpass.getpass(_prompt("Steam password: "))
+    print(_info("Signing in with Steam. Password is sent only to Steam over HTTPS."))
     return auth.SteamAuthClient().login_with_credentials(
         account_name=account_name,
         password=password,
@@ -598,25 +637,25 @@ def _store_login_result(result: LoginResult) -> storage.AccountMetadata:
 def _login_and_store(account_name: str | None = None) -> tuple[LoginResult, storage.AccountMetadata]:
     result = _login_with_prompts(account_name)
     metadata = _store_login_result(result)
-    print(f"Signed in and stored Steam Community session for {metadata.account_name or metadata.steamid64} ({metadata.steamid64}).")
+    print(_success(f"Signed in and stored Steam Community session for {metadata.account_name or metadata.steamid64} ({metadata.steamid64})."))
     return result, metadata
 
 
 def _print_revocation_code(metadata: storage.AccountMetadata, revocation_code: str) -> None:
     label = metadata.account_name or metadata.steamid64
-    print(f"Steam Guard revocation code for {label} ({metadata.steamid64}): {revocation_code}")
-    print("Store this code offline. Steam formats it as R followed by five digits, and it can remove this authenticator from the account.")
-    print("This is not the seven-digit recovery code Steam requests during account sign-in recovery.")
+    print(f"{_warning(f'Steam Guard revocation code for {label} ({metadata.steamid64}):')} {revocation_code}")
+    print(_warning("Store this code offline. Steam formats it as R followed by five digits, and it can remove this authenticator from the account."))
+    print(_muted("This is not the seven-digit recovery code Steam requests during account sign-in recovery."))
 
 
 def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMetadata:
     result, metadata = _login_and_store(account_name)
-    print("Adding a new mobile authenticator changes account security state and can affect trade/market holds.")
+    print(_warning("Adding a new mobile authenticator changes account security state and can affect trade/market holds."))
     phrase = f"ADD AUTHENTICATOR {result.steamid64}"
-    if input(f"Type {phrase!r} to continue: ") != phrase:
+    if input(_prompt(f"Type {phrase!r} to continue: ")) != phrase:
         raise ValueError("authenticator enrollment cancelled")
 
-    has_linked_phone = input("Have you linked a verified SMS-capable phone number to this Steam account? [y/N]: ").strip().casefold() == "y"
+    has_linked_phone = input(_prompt("Have you linked a verified SMS-capable phone number to this Steam account? [y/N]: ")).strip().casefold() == "y"
     sms_phone_id = "1" if has_linked_phone else None
 
     client = enrollment.EnrollmentClient()
@@ -636,22 +675,22 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
         sessionid=result.sessionid,
     )
     metadata = storage.store_imported_guard(imported)
-    print("Authenticator secrets were stored before finalization.")
+    print(_success("Authenticator secrets were stored before finalization."))
     if imported.revocation_code:
         _print_revocation_code(metadata, imported.revocation_code)
     if has_linked_phone:
-        print("Steam should send the activation code by SMS to the linked phone number.")
+        print(_info("Steam should send the activation code by SMS to the linked phone number."))
     else:
-        print("Steam may send the activation code by email when it offers the no-phone path.")
+        print(_info("Steam may send the activation code by email when it offers the no-phone path."))
     resend_phrase = f"SEND ACTIVATION EMAIL {result.steamid64}"
-    print(f"If no code arrives, type {resend_phrase!r} instead of the code to ask Steam to email another activation code.")
-    activation_code = input("Steam activation code from email or SMS: ").strip()
+    print(_muted(f"If no code arrives, type {resend_phrase!r} instead of the code to ask Steam to email another activation code."))
+    activation_code = input(_prompt("Steam activation code from email or SMS: ")).strip()
     validate_sms_code = has_linked_phone
     if activation_code == resend_phrase:
         client.send_activation_email(result.access_token, result.steamid64)
-        print("Requested an activation-code email from Steam.")
+        print(_success("Requested an activation-code email from Steam."))
         validate_sms_code = False
-        activation_code = input("Steam activation code from email or SMS: ").strip()
+        activation_code = input(_prompt("Steam activation code from email or SMS: ")).strip()
     if not activation_code:
         raise ValueError("Steam activation code is required")
     client.finalize_authenticator(
@@ -661,9 +700,9 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
         activation_code,
         validate_sms_code=validate_sms_code,
     )
-    print(f"Authenticator added and finalized for {metadata.account_name or metadata.steamid64} ({metadata.steamid64}).")
+    print(_success(f"Authenticator added and finalized for {metadata.account_name or metadata.steamid64} ({metadata.steamid64})."))
     if imported.revocation_code:
-        print(f"Stored revocation code remains available with `steamguard-pc revocation-code {metadata.steamid64}`.")
+        print(_muted(f"Stored revocation code remains available with `steamguard-pc revocation-code {metadata.steamid64}`."))
     return metadata
 
 
@@ -676,7 +715,7 @@ def _cmd_login_confirmations(args: argparse.Namespace) -> int:
     _, _, access_token, client = _login_confirmation_context(args.steamid64)
     current = client.get_login_confirmations(access_token)
     if not current:
-        print("No pending login confirmations.")
+        print(_muted("No pending login confirmations."))
         return 0
 
     for confirmation in current:
@@ -694,8 +733,8 @@ def _cmd_respond_login(args: argparse.Namespace, *, confirm: bool) -> int:
         action = "APPROVE" if confirm else "DENY"
         noun = "approval" if confirm else "denial"
         expected = f"{action} LOGIN {client_id}"
-        if input(f"Type {expected!r} to {action.casefold()} this login: ") != expected:
-            print(f"Login {noun} cancelled.")
+        if input(_prompt(f"Type {expected!r} to {action.casefold()} this login: ")) != expected:
+            print(_warning(f"Login {noun} cancelled."))
             return 1
 
         client.respond_to_login_confirmation(
@@ -706,7 +745,7 @@ def _cmd_respond_login(args: argparse.Namespace, *, confirm: bool) -> int:
             confirm=confirm,
         )
         past_tense = "Approved" if confirm else "Denied"
-        print(f"{past_tense} login {client_id}.")
+        print(_success(f"{past_tense} login {client_id}."))
         return 0
 
 
@@ -730,16 +769,16 @@ def _delete_account_with_consent(steamid64: str) -> int:
             raise KeyError(f"missing account metadata for {steamid64}")
 
         label = _account_label(metadata)
-        print(f"Delete stored account {label}?")
-        print("This removes local SteamGuardPC metadata and all stored secrets for this account.")
-        print("This does not remove the authenticator from Steam.")
+        print(_danger(f"Delete stored account {label}?"))
+        print(_warning("This removes local SteamGuardPC metadata and all stored secrets for this account."))
+        print(_muted("This does not remove the authenticator from Steam."))
         expected = f"DELETE ACCOUNT {steamid64}"
-        if input(f"Type {expected!r} to delete this account: ") != expected:
-            print("Account deletion cancelled.")
+        if input(_prompt(f"Type {expected!r} to delete this account: ")) != expected:
+            print(_warning("Account deletion cancelled."))
             return 1
 
         deleted = storage.delete_account(steamid64)
-        print(f"Deleted account {_account_label(deleted)}.")
+        print(_success(f"Deleted account {_account_label(deleted)}."))
         return 0
 
 
@@ -767,14 +806,14 @@ def _cmd_accounts(args: argparse.Namespace) -> int:
         return 0
 
     if not sorted_accounts:
-        print("No accounts imported.")
+        print(_muted("No accounts imported."))
         return 0
 
     for metadata in sorted_accounts:
         print(
             "\t".join(
                 [
-                    metadata.steamid64,
+                    _value(metadata.steamid64),
                     metadata.account_name or "-",
                     metadata.device_id or "-",
                 ]
@@ -790,23 +829,23 @@ def _cmd_import_mafile(args: argparse.Namespace) -> int:
 def _cmd_export_backup(args: argparse.Namespace) -> int:
     selected_ids = _selected_backup_ids(args.steamid64)
     for warning in backup.unsafe_backup_path_warnings(args.path):
-        print(f"Warning: {warning}")
-    print(f"This encrypted backup will contain Steam Guard secrets and session tokens for {len(selected_ids)} account(s).")
-    print("Store the backup and passphrase separately. SteamGuardPC cannot recover a lost backup passphrase.")
+        print(_warning(f"Warning: {warning}"))
+    print(_warning(f"This encrypted backup will contain Steam Guard secrets and session tokens for {len(selected_ids)} account(s)."))
+    print(_muted("Store the backup and passphrase separately. SteamGuardPC cannot recover a lost backup passphrase."))
     if args.include_revocation_code:
-        print("Warning: this backup will include Steam Guard revocation codes.")
-        print("Revocation codes can remove authenticators; include them only for private offline recovery backups.")
+        print(_warning("Warning: this backup will include Steam Guard revocation codes."))
+        print(_warning("Revocation codes can remove authenticators; include them only for private offline recovery backups."))
         revocation_expected = f"INCLUDE REVOCATION CODES {len(selected_ids)} ACCOUNTS"
-        if input(f"Type {revocation_expected!r} to include revocation codes: ") != revocation_expected:
-            print("Backup export cancelled.")
+        if input(_prompt(f"Type {revocation_expected!r} to include revocation codes: ")) != revocation_expected:
+            print(_warning("Backup export cancelled."))
             return 1
     expected = f"EXPORT BACKUP {len(selected_ids)} ACCOUNTS"
-    if input(f"Type {expected!r} to write encrypted backup: ") != expected:
-        print("Backup export cancelled.")
+    if input(_prompt(f"Type {expected!r} to write encrypted backup: ")) != expected:
+        print(_warning("Backup export cancelled."))
         return 1
 
-    passphrase = getpass.getpass("Backup passphrase: ")
-    repeated = getpass.getpass("Repeat backup passphrase: ")
+    passphrase = getpass.getpass(_prompt("Backup passphrase: "))
+    repeated = getpass.getpass(_prompt("Repeat backup passphrase: "))
     if not passphrase or not repeated:
         raise ValueError("backup passphrase is required")
     if passphrase != repeated:
@@ -819,27 +858,27 @@ def _cmd_export_backup(args: argparse.Namespace) -> int:
         overwrite=args.force,
         include_revocation_code=args.include_revocation_code,
     )
-    print(f"Wrote encrypted backup for {count} account(s) to {args.path}.")
+    print(_success(f"Wrote encrypted backup for {count} account(s) to {args.path}."))
     return 0
 
 
 def _cmd_import_backup(args: argparse.Namespace) -> int:
     for warning in backup.unsafe_backup_path_warnings(args.path):
-        print(f"Warning: {warning}")
-    print("This will import Steam Guard secrets from an encrypted SteamGuardPC backup.")
+        print(_warning(f"Warning: {warning}"))
+    print(_warning("This will import Steam Guard secrets from an encrypted SteamGuardPC backup."))
     if args.replace:
-        print("Existing matching accounts will be overwritten with values from the backup.")
+        print(_warning("Existing matching accounts will be overwritten with values from the backup."))
     else:
-        print("Existing accounts are refused unless --replace is used.")
-    if input("Type 'IMPORT BACKUP' to import encrypted backup: ") != "IMPORT BACKUP":
-        print("Backup import cancelled.")
+        print(_muted("Existing accounts are refused unless --replace is used."))
+    if input(_prompt("Type 'IMPORT BACKUP' to import encrypted backup: ")) != "IMPORT BACKUP":
+        print(_warning("Backup import cancelled."))
         return 1
 
-    passphrase = getpass.getpass("Backup passphrase: ")
+    passphrase = getpass.getpass(_prompt("Backup passphrase: "))
     if not passphrase:
         raise ValueError("backup passphrase is required")
     count = backup.import_accounts(args.path, passphrase, replace=args.replace)
-    print(f"Imported encrypted backup for {count} account(s).")
+    print(_success(f"Imported encrypted backup for {count} account(s)."))
     return 0
 
 
@@ -847,11 +886,11 @@ def _cmd_set_cookies(args: argparse.Namespace) -> int:
     steam_login_secure = os.environ.get("STEAMGUARDPC_STEAM_LOGIN_SECURE")
     sessionid = os.environ.get("STEAMGUARDPC_SESSIONID")
     if steam_login_secure is None or sessionid is None:
-        steam_login_secure = getpass.getpass("steamLoginSecure: ")
-        sessionid = getpass.getpass("sessionid: ")
+        steam_login_secure = getpass.getpass(_prompt("steamLoginSecure: "))
+        sessionid = getpass.getpass(_prompt("sessionid: "))
 
     session.save_community_cookies(args.steamid64, steam_login_secure, sessionid)
-    print(f"Stored Steam Community cookies for {args.steamid64}.")
+    print(_success(f"Stored Steam Community cookies for {args.steamid64}."))
     return 0
 
 
@@ -863,7 +902,7 @@ def _cmd_cookie_guide(args: argparse.Namespace) -> int:
 def _cmd_find_mafiles(args: argparse.Namespace) -> int:
     candidates = mafile.find_mafile_candidates(args.search_dir or None)
     if not candidates:
-        print("No .maFile files found.")
+        print(_muted("No .maFile files found."))
         return 0
 
     for candidate in candidates:
@@ -872,8 +911,8 @@ def _cmd_find_mafiles(args: argparse.Namespace) -> int:
 
 
 def _cmd_setup(args: argparse.Namespace) -> int:
-    print("SteamGuardPC setup")
-    print("Secrets are stored in Windows secret storage; config.json stores metadata only.")
+    print(_info("SteamGuardPC setup"))
+    print(_muted("Secrets are stored in Windows secret storage; config.json stores metadata only."))
     if args.mafile:
         imported, metadata = _import_mafile_path(args.mafile)
         _setup_cookies(
@@ -882,11 +921,11 @@ def _cmd_setup(args: argparse.Namespace) -> int:
             skip_cookies=args.skip_cookies,
         )
     else:
-        print("Choose setup method:")
-        print("  1. Sign in and add a new mobile authenticator in this app")
-        print("  2. Sign in only to store/refresh Steam Community cookies")
-        print("  3. Import an existing .maFile (encrypted SDA files supported)")
-        choice = input("Setup method [1/2/3]: ").strip()
+        print(_info("Choose setup method:"))
+        print(f"  {_value('1')}. Sign in and add a new mobile authenticator in this app")
+        print(f"  {_value('2')}. Sign in only to store/refresh Steam Community cookies")
+        print(f"  {_value('3')}. Import an existing .maFile (encrypted SDA files supported)")
+        choice = input(_prompt("Setup method [1/2/3]: ")).strip()
         if choice == "1":
             metadata = _enroll_with_prompts()
         elif choice == "2":
@@ -902,9 +941,9 @@ def _cmd_setup(args: argparse.Namespace) -> int:
         else:
             raise ValueError("setup cancelled")
 
-    print("Setup complete.")
-    print(f"Next: steamguard-pc code {metadata.steamid64}")
-    print(f"Confirmations: steamguard-pc confirmations {metadata.steamid64}")
+    print(_success("Setup complete."))
+    print(_info(f"Next: steamguard-pc code {metadata.steamid64}"))
+    print(_info(f"Confirmations: steamguard-pc confirmations {metadata.steamid64}"))
     return 0
 
 
@@ -920,8 +959,8 @@ def _cmd_code(args: argparse.Namespace) -> int:
         print(code)
     else:
         remaining = seconds_remaining(timestamp)
-        print(f"{code} expires_in={remaining}s")
-        print("Clock must be synchronized with Steam; sync Windows time if Steam rejects this code.")
+        print(f"{_value(code)} expires_in={remaining}s")
+        print(_muted("Clock must be synchronized with Steam; sync Windows time if Steam rejects this code."))
     return 0
 
 
@@ -948,7 +987,7 @@ def _cmd_confirmations(args: argparse.Namespace) -> int:
         return 0
 
     if not current:
-        print("No pending confirmations.")
+        print(_muted("No pending confirmations."))
         return 0
 
     for confirmation in current:
@@ -960,12 +999,12 @@ def _cmd_revocation_code(args: argparse.Namespace) -> int:
     metadata = storage.load_accounts().get(args.steamid64)
     if metadata is None:
         raise KeyError(f"missing account metadata for {args.steamid64}")
-    print("The Steam Guard revocation code can remove this authenticator from the account.")
-    print("It is R followed by five digits, not the seven-digit recovery code Steam requests during sign-in recovery.")
-    print("Only reveal it in a private terminal where nobody else can see or record it.")
+    print(_warning("The Steam Guard revocation code can remove this authenticator from the account."))
+    print(_muted("It is R followed by five digits, not the seven-digit recovery code Steam requests during sign-in recovery."))
+    print(_warning("Only reveal it in a private terminal where nobody else can see or record it."))
     expected = f"SHOW REVOCATION CODE {args.steamid64}"
-    if input(f"Type {expected!r} to show the revocation code: ") != expected:
-        print("Revocation code display cancelled.")
+    if input(_prompt(f"Type {expected!r} to show the revocation code: ")) != expected:
+        print(_warning("Revocation code display cancelled."))
         return 1
 
     revocation_code = storage.get_required_secret(args.steamid64, "revocation_code")
@@ -977,28 +1016,28 @@ def _cmd_recovery_codes(args: argparse.Namespace) -> int:
     if metadata is None:
         raise KeyError(f"missing account metadata for {args.steamid64}")
     label = _account_label(metadata)
-    print("Steam recovery codes are one-time login codes for official Steam recovery prompts.")
-    print("Creating a new set may replace older emergency codes. Store the new set offline immediately.")
+    print(_info("Steam recovery codes are one-time login codes for official Steam recovery prompts."))
+    print(_warning("Creating a new set may replace older emergency codes. Store the new set offline immediately."))
     expected = f"CREATE RECOVERY CODES {args.steamid64}"
-    if input(f"Type {expected!r} to create recovery codes: ") != expected:
-        print("Recovery-code creation cancelled.")
+    if input(_prompt(f"Type {expected!r} to create recovery codes: ")) != expected:
+        print(_warning("Recovery-code creation cancelled."))
         return 1
 
     access_token, _ = session.refresh_auth_tokens(args.steamid64)
     client = enrollment.EnrollmentClient()
     codes = client.create_emergency_codes(access_token)
     if codes is None:
-        confirmation_code = input("Steam recovery-code confirmation code from email or SMS: ").strip()
+        confirmation_code = input(_prompt("Steam recovery-code confirmation code from email or SMS: ")).strip()
         if not confirmation_code:
             raise ValueError("Steam recovery-code confirmation code is required")
         codes = client.create_emergency_codes(access_token, confirmation_code)
     if codes is None:
         raise EnrollmentError("Steam recovery-code response is missing codes")
 
-    print(f"Steam recovery codes for {label}:")
+    print(_warning(f"Steam recovery codes for {label}:"))
     for code in codes:
         print(code)
-    print("Store these one-time codes offline. They are not saved by SteamGuardPC.")
+    print(_warning("Store these one-time codes offline. They are not saved by SteamGuardPC."))
     return 0
 
 def _cmd_remove_authenticator(args: argparse.Namespace) -> int:
@@ -1008,12 +1047,12 @@ def _cmd_remove_authenticator(args: argparse.Namespace) -> int:
             raise KeyError(f"missing account metadata for {args.steamid64}")
         label = _account_label(metadata)
 
-        print(f"Remove Steam Guard mobile authenticator from {label}?")
-        print("This changes Steam account security state. Steam says removal reduces account security and blocks trading or Community Market selling for 15 days.")
-        print("SteamGuardPC will delete local authenticator secrets after Steam confirms removal. Local account metadata and sign-in/session tokens are kept.")
+        print(_danger(f"Remove Steam Guard mobile authenticator from {label}?"))
+        print(_warning("This changes Steam account security state. Steam says removal reduces account security and blocks trading or Community Market selling for 15 days."))
+        print(_muted("SteamGuardPC will delete local authenticator secrets after Steam confirms removal. Local account metadata and sign-in/session tokens are kept."))
         expected = f"REMOVE AUTHENTICATOR {args.steamid64}"
-        if input(f"Type {expected!r} to remove this authenticator: ") != expected:
-            print("Authenticator removal cancelled.")
+        if input(_prompt(f"Type {expected!r} to remove this authenticator: ")) != expected:
+            print(_warning("Authenticator removal cancelled."))
             return 1
 
         revocation_code = storage.get_required_secret(args.steamid64, "revocation_code")
@@ -1021,8 +1060,8 @@ def _cmd_remove_authenticator(args: argparse.Namespace) -> int:
         enrollment.EnrollmentClient().remove_authenticator(access_token, revocation_code)
         storage.delete_authenticator_secrets(args.steamid64)
 
-        print(f"Removed Steam Guard mobile authenticator from {label}.")
-        print(f"Deleted local authenticator secrets. Sign-in/session tokens remain; run `steamguard-pc accounts --delete {args.steamid64}` to delete the local account.")
+        print(_success(f"Removed Steam Guard mobile authenticator from {label}."))
+        print(_muted(f"Deleted local authenticator secrets. Sign-in/session tokens remain; run `steamguard-pc accounts --delete {args.steamid64}` to delete the local account."))
         return 0
 
 
@@ -1041,8 +1080,8 @@ def _cmd_approve(args: argparse.Namespace) -> int:
             args.confirmation_id,
         )
         expected = f"APPROVE {args.confirmation_id}"
-        if input(f"Type {expected!r} to approve: ") != expected:
-            print("Approval cancelled.")
+        if input(_prompt(f"Type {expected!r} to approve: ")) != expected:
+            print(_warning("Approval cancelled."))
             return 1
 
         try:
@@ -1064,7 +1103,7 @@ def _cmd_approve(args: argparse.Namespace) -> int:
                 args.confirmation_id,
                 accept=True,
             )
-        print(f"Approved {args.confirmation_id}.")
+        print(_success(f"Approved {args.confirmation_id}."))
         return 0
 
 
@@ -1083,8 +1122,8 @@ def _cmd_cancel(args: argparse.Namespace) -> int:
             args.confirmation_id,
         )
         expected = f"CANCEL {args.confirmation_id}"
-        if input(f"Type {expected!r} to cancel: ") != expected:
-            print("Cancellation cancelled.")
+        if input(_prompt(f"Type {expected!r} to cancel: ")) != expected:
+            print(_warning("Cancellation cancelled."))
             return 1
 
         try:
@@ -1106,30 +1145,30 @@ def _cmd_cancel(args: argparse.Namespace) -> int:
                 args.confirmation_id,
                 accept=False,
             )
-        print(f"Cancelled {args.confirmation_id}.")
+        print(_success(f"Cancelled {args.confirmation_id}."))
         return 0
 
 def _cmd_batch_confirm(args: argparse.Namespace, accept: bool) -> int:
     with operation_lock.account_operation_lock(args.steamid64):
         metadata, identity_secret, community_session, current = _load_current_confirmations(args.steamid64)
         if not current:
-            print("No pending confirmations.")
+            print(_muted("No pending confirmations."))
             return 0
 
         _print_batch_confirmation_review(metadata, community_session, identity_secret, current)
         if accept:
             unsafe = _unsafe_batch_approval_confirmations(current)
             if unsafe:
-                print("Batch approval blocked: approve-all only supports Trade and Market listing confirmations.")
+                print(_danger("Batch approval blocked: approve-all only supports Trade and Market listing confirmations."))
                 for confirmation in unsafe:
-                    print(f"blocked: {confirmation.id}\t{_confirmation_type(confirmation)}\t{confirmation.creator_id or '-'}")
+                    print(_warning(f"blocked: {confirmation.id}\t{_confirmation_type(confirmation)}\t{confirmation.creator_id or '-'}"))
                 return 1
 
         action = "APPROVE" if accept else "CANCEL"
         noun = "approval" if accept else "cancellation"
         expected = f"{action} ALL {len(current)} CONFIRMATIONS {args.steamid64}"
-        if input(f"Type {expected!r} to {'approve' if accept else 'cancel'} all listed confirmations: ") != expected:
-            print(f"Batch {noun} cancelled.")
+        if input(_prompt(f"Type {expected!r} to {'approve' if accept else 'cancel'} all listed confirmations: ")) != expected:
+            print(_warning(f"Batch {noun} cancelled."))
             return 1
 
         confirmation_ids = [item.id for item in current]
@@ -1154,7 +1193,7 @@ def _cmd_batch_confirm(args: argparse.Namespace, accept: bool) -> int:
             )
 
         verb = "Approved" if accept else "Cancelled"
-        print(f"{verb} {len(acted)} confirmations.")
+        print(_success(f"{verb} {len(acted)} confirmations."))
         return 0
 
 
