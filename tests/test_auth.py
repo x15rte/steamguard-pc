@@ -10,6 +10,7 @@ from steamguard_pc._protobuf import Field, decode_message, encode_message, encod
 
 STEAMID64 = "76561197960287930"
 ACCESS_TOKEN_COOKIE = f"{STEAMID64}%7C%7Caccess-token"
+SHARED_SECRET = "MDEyMzQ1Njc4OWFiY2RlZmdoaWo="
 
 def jwt_token(payload: dict) -> str:
     encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
@@ -315,6 +316,104 @@ def test_refresh_access_token_uses_refresh_token_subject(monkeypatch):
     assert client.refresh_access_token(token) == ("access-token", None)
     assert captured["method"] == "GenerateAccessTokenForApp"
 
+
+
+def test_get_login_confirmations_fetches_client_ids_and_details(monkeypatch):
+    client = auth.SteamAuthClient()
+    calls = []
+
+    def fake_api(api_method, request_data, response_descriptor, method="POST", access_token=None):
+        calls.append((api_method, request_data, method, access_token))
+        if api_method == "GetAuthSessionsForAccount":
+            assert request_data == b""
+            return {"client_ids": [123]}
+        if api_method == "GetAuthSessionInfo":
+            decoded = decode_message(request_data, {1: Field(1, "client_id", "varint")})
+            assert decoded["client_id"] == 123
+            return {
+                "ip": "203.0.113.10",
+                "city": "Seattle",
+                "state": "WA",
+                "country": "US",
+                "platform_type": 2,
+                "device_friendly_name": "Firefox on Windows",
+                "version": 2,
+                "requestor_location_mismatch": True,
+            }
+        raise AssertionError(api_method)
+
+    monkeypatch.setattr(client, "_api_request", fake_api)
+
+    confirmations = client.get_login_confirmations("access-token")
+
+    assert len(confirmations) == 1
+    confirmation = confirmations[0]
+    assert confirmation.client_id == 123
+    assert confirmation.version == 2
+    assert confirmation.ip == "203.0.113.10"
+    assert confirmation.city == "Seattle"
+    assert confirmation.state == "WA"
+    assert confirmation.country == "US"
+    assert confirmation.platform_type == 2
+    assert confirmation.device_friendly_name == "Firefox on Windows"
+    assert confirmation.location_mismatch is True
+    assert [call[0] for call in calls] == ["GetAuthSessionsForAccount", "GetAuthSessionInfo"]
+    assert [call[3] for call in calls] == ["access-token", "access-token"]
+    assert [call[2] for call in calls] == ["GET", "POST"]
+
+
+def test_respond_to_login_confirmation_encodes_signed_request(monkeypatch):
+    client = auth.SteamAuthClient()
+    captured = {}
+
+    def fake_api(api_method, request_data, response_descriptor, method="POST", access_token=None):
+        captured["method"] = api_method
+        captured["request"] = request_data
+        captured["access_token"] = access_token
+        return {}
+
+    monkeypatch.setattr(client, "_api_request", fake_api)
+
+    client.respond_to_login_confirmation(
+        "access-token",
+        STEAMID64,
+        SHARED_SECRET,
+        auth.LoginConfirmation(client_id=76543210987654321, version=2),
+        confirm=True,
+    )
+
+    decoded = decode_message(
+        captured["request"],
+        {
+            1: Field(1, "version", "varint"),
+            2: Field(2, "client_id", "varint"),
+            3: Field(3, "steamid", "fixed64"),
+            4: Field(4, "signature", "length"),
+            5: Field(5, "confirm", "varint"),
+            6: Field(6, "persistence", "varint"),
+        },
+    )
+    assert captured["method"] == "UpdateAuthSessionWithMobileConfirmation"
+    assert captured["access_token"] == "access-token"
+    assert decoded["version"] == 2
+    assert decoded["client_id"] == 76543210987654321
+    assert decoded["steamid"] == int(STEAMID64)
+    assert bool(decoded["confirm"]) is True
+    assert decoded["persistence"] == auth.SESSION_PERSISTENT
+    assert base64.b64encode(decoded["signature"]).decode("ascii") == "ijNyqQTGji2I1+a5M3161IhsL3XDJ/HCHRDtGbt54m0="
+
+
+def test_get_login_confirmation_requires_version(monkeypatch):
+    client = auth.SteamAuthClient()
+
+    def fake_api(api_method, request_data, response_descriptor, method="POST", access_token=None):
+        assert api_method == "GetAuthSessionInfo"
+        return {"ip": "203.0.113.10"}
+
+    monkeypatch.setattr(client, "_api_request", fake_api)
+
+    with pytest.raises(auth.SteamAuthResponseError, match="^Steam login-confirmation response is missing version$"):
+        client.get_login_confirmation("access-token", 123)
 
 def test_jwt_expiration_reads_exp_claim():
     token = jwt_token({"sub": STEAMID64, "exp": 1700000050})

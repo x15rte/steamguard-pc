@@ -66,6 +66,26 @@ def confirmation_key(
     return timestamp, base64.b64encode(digest).decode("ascii")
 
 
+def login_confirmation_signature(shared_secret_b64: str, version: int, client_id: int, steamid64: str | int) -> bytes:
+    try:
+        version_int = int(version)
+        client_id_int = int(client_id)
+        steamid_int = int(steamid64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid login confirmation identifiers") from exc
+
+    if not (
+        0 <= version_int <= 0xFFFF
+        and 1 <= client_id_int <= 0xFFFFFFFFFFFFFFFF
+        and 1 <= steamid_int <= 0xFFFFFFFFFFFFFFFF
+    ):
+        raise ValueError("invalid login confirmation identifiers")
+
+    secret = _decode_base64_secret(shared_secret_b64, "shared_secret")
+    payload = struct.pack("<HQQ", version_int, client_id_int, steamid_int)
+    return hmac.new(secret, payload, hashlib.sha256).digest()
+
+
 def generate_device_id(steamid64: str) -> str:
     digest = hashlib.sha1(str(steamid64).encode("ascii")).hexdigest()
     return "android:%s-%s-%s-%s-%s" % (

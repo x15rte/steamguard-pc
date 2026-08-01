@@ -49,6 +49,9 @@ def test_top_level_help_is_descriptive(capsys):
     assert "Authenticator secrets stay in Windows secret storage" not in output
     assert "Quick paths:" in output
     assert "revocation-code" in output
+    assert "login-confirmations" in output
+    assert "approve-login" in output
+    assert "deny-login" in output
     assert "commands:" in output
     assert "setup" in output
     assert "Guided first-run setup." in output
@@ -721,6 +724,188 @@ def _patch_confirmation_context(monkeypatch, calls):
         return target
 
     monkeypatch.setattr(cli.confirmations, "respond_to_confirmation_id", respond_to_confirmation_id)
+
+
+def _seed_login_confirmation_account() -> None:
+    cli.storage.upsert_account(
+        AccountMetadata(
+            steamid64=STEAMID64,
+            account_name="fixture",
+            device_id="android:fixture",
+        )
+    )
+    cli.storage.put_secret(STEAMID64, "shared_secret", SHARED_SECRET)
+    cli.storage.put_secret(STEAMID64, "refresh_token", "refresh-token")
+
+
+def _patch_login_confirmation_context(monkeypatch, fake_client) -> None:
+    def refresh_auth_tokens(steamid64):
+        assert steamid64 == STEAMID64
+        return "access-token", "refresh-token"
+
+    @contextmanager
+    def account_operation_lock(steamid64):
+        assert steamid64 == STEAMID64
+        yield
+
+    monkeypatch.setattr(cli.session, "refresh_auth_tokens", refresh_auth_tokens)
+    monkeypatch.setattr(cli.auth, "SteamAuthClient", lambda: fake_client)
+    monkeypatch.setattr(cli.operation_lock, "account_operation_lock", account_operation_lock)
+
+
+def test_login_confirmations_lists_details(monkeypatch, keyring_store, capsys):
+    _seed_login_confirmation_account()
+    calls = []
+
+    class FakeClient:
+        def get_login_confirmations(self, access_token):
+            calls.append(access_token)
+            return [
+                cli.auth.LoginConfirmation(
+                    client_id=123,
+                    version=2,
+                    ip="203.0.113.10",
+                    city="Seattle",
+                    state="WA",
+                    country="US",
+                    platform_type=2,
+                    device_friendly_name="Firefox on Windows",
+                )
+            ]
+
+    _patch_login_confirmation_context(monkeypatch, FakeClient())
+
+    assert cli.main(["login-confirmations", STEAMID64]) == 0
+
+    assert calls == ["access-token"]
+    assert capsys.readouterr().out == "123\t203.0.113.10\tSeattle, WA, US\tWeb browser\tFirefox on Windows\n"
+
+
+def test_login_confirmations_no_pending(monkeypatch, keyring_store, capsys):
+    _seed_login_confirmation_account()
+
+    class FakeClient:
+        def get_login_confirmations(self, access_token):
+            assert access_token == "access-token"
+            return []
+
+    _patch_login_confirmation_context(monkeypatch, FakeClient())
+
+    assert cli.main(["login-confirmations", STEAMID64]) == 0
+
+    assert capsys.readouterr().out == "No pending login confirmations.\n"
+
+
+def test_approve_login_requires_exact_phrase_without_action(monkeypatch, keyring_store, capsys):
+    _seed_login_confirmation_account()
+    respond_calls = []
+
+    class FakeClient:
+        def get_login_confirmation(self, access_token, client_id):
+            assert access_token == "access-token"
+            assert client_id == 123
+            return cli.auth.LoginConfirmation(
+                client_id=123,
+                version=2,
+                ip="203.0.113.10",
+                city="Seattle",
+                state="WA",
+                country="US",
+                platform_type=2,
+                device_friendly_name="Firefox on Windows",
+            )
+
+        def respond_to_login_confirmation(self, *args, **kwargs):
+            respond_calls.append((args, kwargs))
+
+    _patch_login_confirmation_context(monkeypatch, FakeClient())
+    monkeypatch.setattr("sys.stdin", io.StringIO("WRONG\n"))
+
+    assert cli.main(["approve-login", STEAMID64, "123"]) == 1
+
+    output = capsys.readouterr().out
+    assert respond_calls == []
+    assert f"account: fixture ({STEAMID64})" in output
+    assert "client_id: 123" in output
+    assert "Login approval cancelled." in output
+
+
+def test_approve_login_shows_details_and_submits(monkeypatch, keyring_store, capsys):
+    _seed_login_confirmation_account()
+    respond_calls = []
+
+    class FakeClient:
+        def get_login_confirmation(self, access_token, client_id):
+            assert access_token == "access-token"
+            return cli.auth.LoginConfirmation(client_id=client_id, version=2, ip="203.0.113.10")
+
+        def respond_to_login_confirmation(self, access_token, steamid64, shared_secret, confirmation, *, confirm):
+            respond_calls.append(
+                {
+                    "access_token": access_token,
+                    "steamid64": steamid64,
+                    "shared_secret": shared_secret,
+                    "client_id": confirmation.client_id,
+                    "confirm": confirm,
+                }
+            )
+
+    _patch_login_confirmation_context(monkeypatch, FakeClient())
+    monkeypatch.setattr("sys.stdin", io.StringIO("APPROVE LOGIN 123\n"))
+
+    assert cli.main(["approve-login", STEAMID64, "123"]) == 0
+
+    assert respond_calls == [
+        {
+            "access_token": "access-token",
+            "steamid64": STEAMID64,
+            "shared_secret": SHARED_SECRET,
+            "client_id": 123,
+            "confirm": True,
+        }
+    ]
+    output = capsys.readouterr().out
+    assert "ip: 203.0.113.10" in output
+    assert "Approved login 123." in output
+
+
+def test_deny_login_shows_details_and_submits(monkeypatch, keyring_store, capsys):
+    _seed_login_confirmation_account()
+    respond_calls = []
+
+    class FakeClient:
+        def get_login_confirmation(self, access_token, client_id):
+            assert access_token == "access-token"
+            return cli.auth.LoginConfirmation(client_id=client_id, version=2, ip="203.0.113.10")
+
+        def respond_to_login_confirmation(self, access_token, steamid64, shared_secret, confirmation, *, confirm):
+            respond_calls.append(
+                {
+                    "access_token": access_token,
+                    "steamid64": steamid64,
+                    "shared_secret": shared_secret,
+                    "client_id": confirmation.client_id,
+                    "confirm": confirm,
+                }
+            )
+
+    _patch_login_confirmation_context(monkeypatch, FakeClient())
+    monkeypatch.setattr("sys.stdin", io.StringIO("DENY LOGIN 123\n"))
+
+    assert cli.main(["deny-login", STEAMID64, "123"]) == 0
+
+    assert respond_calls == [
+        {
+            "access_token": "access-token",
+            "steamid64": STEAMID64,
+            "shared_secret": SHARED_SECRET,
+            "client_id": 123,
+            "confirm": False,
+        }
+    ]
+    output = capsys.readouterr().out
+    assert "ip: 203.0.113.10" in output
+    assert "Denied login 123." in output
 
 
 def _patch_batch_confirmation_context(monkeypatch, calls, current=None):

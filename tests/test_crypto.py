@@ -1,8 +1,10 @@
+import base64
 import pytest
 
 from steamguard_pc.crypto import (
     confirmation_key,
     generate_device_id,
+    login_confirmation_signature,
     steam_totp,
     validate_base64_secret,
 )
@@ -44,6 +46,19 @@ def test_steam_totp_matches_deterministic_fixtures(timestamp, expected):
 )
 def test_confirmation_key_matches_deterministic_fixtures(tag, expected):
     assert confirmation_key(IDENTITY_SECRET, tag, 1700000000) == (1700000000, expected)
+
+
+def test_login_confirmation_signature_matches_fixture():
+    signature = login_confirmation_signature(SHARED_SECRET, 2, 76543210987654321, STEAMID64)
+
+    assert base64.b64encode(signature).decode("ascii") == "ijNyqQTGji2I1+a5M3161IhsL3XDJ/HCHRDtGbt54m0="
+
+
+def test_login_confirmation_signature_rejects_bad_input():
+    with pytest.raises(ValueError, match="^invalid login confirmation identifiers$"):
+        login_confirmation_signature(SHARED_SECRET, 0x10000, 76543210987654321, STEAMID64)
+    with pytest.raises(ValueError, match="^invalid shared_secret$"):
+        login_confirmation_signature("not base64", 2, 76543210987654321, STEAMID64)
 
 
 def test_generate_device_id_matches_deterministic_fixture():

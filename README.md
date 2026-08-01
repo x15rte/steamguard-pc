@@ -1,6 +1,6 @@
 # SteamGuardPC
 
-SteamGuardPC is a Windows command-line tool for managing Steam Guard on a PC. It can import an existing Steam Desktop Authenticator `.maFile` or enroll a new mobile authenticator, generate 5-character Steam Guard login codes, and list or act on Steam mobile confirmations.
+SteamGuardPC is a Windows command-line tool for managing Steam Guard on a PC. It can import an existing Steam Desktop Authenticator `.maFile` or enroll a new mobile authenticator, generate 5-character Steam Guard login codes, approve or deny Steam login confirmations, and list or act on Steam mobile confirmations.
 
 It is not affiliated with Valve or Steam.
 
@@ -9,7 +9,7 @@ It is not affiliated with Valve or Steam.
 - Windows.
 - Python 3.11 or newer.
 - A working `keyring` backend. On Windows this should use Windows secret storage; the null backend is rejected.
-- Network access to Steam when signing in, enrolling, refreshing sessions, querying Steam time, creating recovery codes, or handling confirmations.
+- Network access to Steam when signing in, enrolling, refreshing sessions, querying Steam time, creating recovery codes, or handling login/mobile confirmations.
 
 ## Install from this checkout
 
@@ -55,6 +55,7 @@ After setup:
 ```powershell
 steamguard-pc accounts
 steamguard-pc code STEAMID64 --steam-time
+steamguard-pc login-confirmations STEAMID64
 steamguard-pc confirmations STEAMID64
 ```
 
@@ -68,6 +69,16 @@ steamguard-pc code STEAMID64 --steam-time
 ```
 
 `--steam-time` asks Steam for the current server time before generating the code. Use it if Steam rejects local-clock codes.
+
+### Approve a Steam login confirmation
+
+```powershell
+steamguard-pc login-confirmations STEAMID64
+steamguard-pc approve-login STEAMID64 CLIENT_ID
+steamguard-pc deny-login    STEAMID64 CLIENT_ID
+```
+
+Login confirmations are Steam sign-in approval requests for this account. SteamGuardPC refreshes the stored MobileApp access token, shows the request IP address, approximate location, platform, and device name Steam reports, then requires an exact typed phrase before approving or denying the selected login. Approve only requests you recognize.
 
 ### Review and act on confirmations
 
@@ -144,6 +155,9 @@ Run `steamguard-pc COMMAND -h` for command-specific options.
 | `login [ACCOUNT_NAME]` | Sign in and store refresh/access tokens plus Steam Community session data. |
 | `accounts [--delete STEAMID64]` | List local accounts or delete one local account and all of its stored secrets. Steam is not changed. |
 | `code STEAMID64 [--timestamp UNIX_TIME] [--steam-time]` | Print a Steam Guard login code and seconds remaining. |
+| `login-confirmations STEAMID64` | List pending Steam login confirmations. |
+| `approve-login STEAMID64 CLIENT_ID` | Approve one Steam login confirmation. |
+| `deny-login STEAMID64 CLIENT_ID` | Deny one Steam login confirmation. |
 | `confirmations STEAMID64` | List pending mobile confirmations. |
 | `approve STEAMID64 CONFIRMATION_ID` | Approve one pending confirmation after review and exact typed consent. |
 | `cancel STEAMID64 CONFIRMATION_ID` | Cancel one pending confirmation after review and exact typed consent. |
@@ -173,6 +187,6 @@ Steam passwords are prompted only during `login` or `enroll` and are not stored.
 
 - Adding a new authenticator changes Steam account security state and can affect trade or market holds.
 - Deleting an account in SteamGuardPC removes only local metadata and secrets. It does not remove the authenticator from Steam.
-- Sign-in supports email codes, mobile authenticator codes, and email/mobile approval prompts. Unsupported Steam risk checks or agreement prompts must be completed outside this tool before retrying.
+- Sign-in supports email codes, mobile authenticator codes, and email/mobile approval prompts; use `login-confirmations`/`approve-login`/`deny-login` to approve or deny other pending Steam login requests. Unsupported Steam risk checks or agreement prompts must be completed outside this tool before retrying.
 - If confirmations report an expired session, run `steamguard-pc login ACCOUNT_NAME` or `steamguard-pc set-cookies STEAMID64`.
 - If Steam rejects generated codes, sync Windows time or use `steamguard-pc code STEAMID64 --steam-time`.

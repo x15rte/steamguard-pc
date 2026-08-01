@@ -10,6 +10,7 @@ from urllib.parse import quote
 import requests
 
 from ._protobuf import Field, WireType, decode_message, encode_message, encode_nested
+from .crypto import login_confirmation_signature
 
 
 AUTH_SERVICE_URL = "https://api.steampowered.com/IAuthenticationService/{method}/v1/"
@@ -90,6 +91,25 @@ _ACCESS_TOKEN_RESPONSE = {
     1: Field(1, "access_token", "length"),
     2: Field(2, "refresh_token", "length"),
 }
+_AUTH_SESSIONS_FOR_ACCOUNT_RESPONSE = {
+    1: Field(1, "client_ids", "varint", repeated=True),
+}
+_AUTH_SESSION_INFO_RESPONSE = {
+    1: Field(1, "ip", "length"),
+    2: Field(2, "geoloc", "length"),
+    3: Field(3, "city", "length"),
+    4: Field(4, "state", "length"),
+    5: Field(5, "country", "length"),
+    6: Field(6, "platform_type", "varint"),
+    7: Field(7, "device_friendly_name", "length"),
+    8: Field(8, "version", "varint"),
+    9: Field(9, "login_history", "varint"),
+    10: Field(10, "requestor_location_mismatch", "varint"),
+    11: Field(11, "high_usage_login", "varint"),
+    12: Field(12, "requested_persistence", "varint"),
+    13: Field(13, "device_trust", "varint"),
+    14: Field(14, "app_type", "varint"),
+}
 
 
 class SteamAuthError(RuntimeError):
@@ -145,12 +165,43 @@ class LoginResult:
     sessionid: str
     steam_guard_machine_token: str | None = None
 
+
+@dataclass(frozen=True)
+class LoginConfirmation:
+    client_id: int
+    version: int
+    ip: str | None = None
+    geoloc: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+    platform_type: int | None = None
+    device_friendly_name: str | None = None
+    login_history: int | None = None
+    location_mismatch: bool = False
+    high_usage_login: bool = False
+    requested_persistence: int | None = None
+    device_trust: int | None = None
+    app_type: int | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
 @dataclass(frozen=True)
 class WebLoginResult:
     steamid64: str
     steam_login_secure: str
     sessionid: str
     steam_refresh_secure: str | None = None
+
+
+def _optional_payload_text(payload: Mapping[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    else:
+        text = str(value)
+    return text or None
 
 
 def decode_jwt_payload(token: str) -> dict[str, Any]:
@@ -396,6 +447,86 @@ class SteamAuthClient:
         if not access_token:
             raise SteamAuthResponseError("Steam access-token response is missing access_token")
         return str(access_token), str(payload["refresh_token"]) if payload.get("refresh_token") else None
+
+    def get_login_confirmation_client_ids(self, access_token: str) -> list[int]:
+        payload = self._api_request(
+            "GetAuthSessionsForAccount",
+            b"",
+            _AUTH_SESSIONS_FOR_ACCOUNT_RESPONSE,
+            access_token=access_token,
+            method="GET",
+        )
+        client_ids = payload.get("client_ids") or []
+        return [int(client_id) for client_id in client_ids]
+
+    def get_login_confirmation(self, access_token: str, client_id: int) -> LoginConfirmation:
+        request = encode_message([(1, "varint", int(client_id))])
+        payload = self._api_request(
+            "GetAuthSessionInfo",
+            request,
+            _AUTH_SESSION_INFO_RESPONSE,
+            access_token=access_token,
+        )
+        if "version" not in payload:
+            raise SteamAuthResponseError("Steam login-confirmation response is missing version")
+
+        return LoginConfirmation(
+            client_id=int(client_id),
+            version=int(payload["version"]),
+            ip=_optional_payload_text(payload, "ip"),
+            geoloc=_optional_payload_text(payload, "geoloc"),
+            city=_optional_payload_text(payload, "city"),
+            state=_optional_payload_text(payload, "state"),
+            country=_optional_payload_text(payload, "country"),
+            platform_type=int(payload["platform_type"]) if "platform_type" in payload else None,
+            device_friendly_name=_optional_payload_text(payload, "device_friendly_name"),
+            login_history=int(payload["login_history"]) if "login_history" in payload else None,
+            location_mismatch=bool(payload.get("requestor_location_mismatch", payload.get("location_mismatch", False))),
+            high_usage_login=bool(payload.get("high_usage_login", False)),
+            requested_persistence=int(payload["requested_persistence"]) if "requested_persistence" in payload else None,
+            device_trust=int(payload["device_trust"]) if "device_trust" in payload else None,
+            app_type=int(payload["app_type"]) if "app_type" in payload else None,
+            raw=dict(payload),
+        )
+
+    def get_login_confirmations(self, access_token: str) -> list[LoginConfirmation]:
+        return [
+            self.get_login_confirmation(access_token, client_id)
+            for client_id in self.get_login_confirmation_client_ids(access_token)
+        ]
+
+    def respond_to_login_confirmation(
+        self,
+        access_token: str,
+        steamid64: str,
+        shared_secret_b64: str,
+        confirmation: LoginConfirmation,
+        *,
+        confirm: bool,
+        persistence: int = SESSION_PERSISTENT,
+    ) -> None:
+        signature = login_confirmation_signature(
+            shared_secret_b64,
+            confirmation.version,
+            confirmation.client_id,
+            steamid64,
+        )
+        request = encode_message(
+            [
+                (1, "varint", confirmation.version),
+                (2, "varint", confirmation.client_id),
+                (3, "fixed64", int(steamid64)),
+                (4, "length", signature),
+                (5, "varint", confirm),
+                (6, "varint", persistence),
+            ]
+        )
+        self._api_request(
+            "UpdateAuthSessionWithMobileConfirmation",
+            request,
+            {},
+            access_token=access_token,
+        )
 
     def login_with_credentials(
         self,

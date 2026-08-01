@@ -61,6 +61,12 @@ Quick paths:
   steamguard-pc code STEAMID64 [--steam-time]
       Print the current 5-character Steam Guard login code and seconds remaining.
 
+  steamguard-pc login-confirmations STEAMID64
+  steamguard-pc approve-login STEAMID64 CLIENT_ID
+  steamguard-pc deny-login    STEAMID64 CLIENT_ID
+      Review Steam login approval requests with IP/location/device details,
+      then approve or deny one after exact typed consent.
+
   steamguard-pc confirmations STEAMID64
       List pending mobile confirmations for a stored account.
 
@@ -117,6 +123,10 @@ def _confirmation_type(confirmation: Confirmation) -> str:
 
 KNOWN_BATCH_APPROVAL_TYPES = {2, 3, "2", "3"}
 KNOWN_BATCH_APPROVAL_LABELS = {"trade", "market", "market listing", "marketlisting"}
+_AUTH_PLATFORM_LABELS = {1: "Steam client", 2: "Web browser", 3: "Mobile app"}
+_SESSION_PERSISTENCE_LABELS = {-1: "Invalid", 0: "Ephemeral", 1: "Persistent"}
+_SECURITY_HISTORY_LABELS = {1: "Used previously", 2: "No prior history"}
+
 
 
 def _confirmation_is_safe_for_batch_approval(confirmation: Confirmation) -> bool:
@@ -160,6 +170,75 @@ def _print_confirmation_detail(confirmation: Confirmation, account_label: str | 
     print(f"creator_id: {confirmation.creator_id or '-'}")
     print(f"headline: {confirmation.headline or '-'}")
     print(f"summary: {_summary_text(confirmation.summary)}")
+
+def _parse_client_id(value: str) -> int:
+    if not value.isdecimal():
+        raise ValueError("CLIENT_ID must be a positive unsigned integer")
+    client_id = int(value)
+    if not 1 <= client_id <= 0xFFFFFFFFFFFFFFFF:
+        raise ValueError("CLIENT_ID must be a positive unsigned integer")
+    return client_id
+
+
+def _login_location_text(confirmation: auth.LoginConfirmation) -> str:
+    parts = [
+        part
+        for part in (confirmation.city, confirmation.state, confirmation.country)
+        if part
+    ]
+    if parts:
+        return ", ".join(parts)
+    return confirmation.geoloc or "-"
+
+
+def _login_platform_text(value: int | None) -> str:
+    if value is None:
+        return "-"
+    return _AUTH_PLATFORM_LABELS.get(value, str(value))
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def _print_login_confirmation_row(confirmation: auth.LoginConfirmation) -> None:
+    print(
+        "\t".join(
+            [
+                str(confirmation.client_id),
+                confirmation.ip or "-",
+                _login_location_text(confirmation),
+                _login_platform_text(confirmation.platform_type),
+                confirmation.device_friendly_name or "-",
+            ]
+        )
+    )
+
+
+def _login_history_text(value: int | None) -> str:
+    if value is None:
+        return "-"
+    return _SECURITY_HISTORY_LABELS.get(value, str(value))
+
+
+def _requested_persistence_text(value: int | None) -> str:
+    if value is None:
+        return "-"
+    return _SESSION_PERSISTENCE_LABELS.get(value, str(value))
+
+
+def _print_login_confirmation_detail(metadata: storage.AccountMetadata, confirmation: auth.LoginConfirmation) -> None:
+    print(f"account: {_account_label(metadata)}")
+    print(f"client_id: {confirmation.client_id}")
+    print(f"ip: {confirmation.ip or '-'}")
+    print(f"location: {_login_location_text(confirmation)}")
+    print(f"geoloc: {confirmation.geoloc or '-'}")
+    print(f"platform: {_login_platform_text(confirmation.platform_type)}")
+    print(f"device: {confirmation.device_friendly_name or '-'}")
+    print(f"login_history: {_login_history_text(confirmation.login_history)}")
+    print(f"requested_persistence: {_requested_persistence_text(confirmation.requested_persistence)}")
+    print(f"location_mismatch: {_yes_no(confirmation.location_mismatch)}")
+    print(f"high_usage_login: {_yes_no(confirmation.high_usage_login)}")
 
 
 def _print_trade_offer_id(
@@ -237,6 +316,13 @@ def _confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str,
     identity_secret = storage.get_required_secret(steamid64, "identity_secret")
     community_session = session.get_community_session(steamid64)
     return metadata, identity_secret, community_session
+
+
+def _login_confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str, str, auth.SteamAuthClient]:
+    metadata = _account_metadata(steamid64)
+    shared_secret = storage.get_required_secret(steamid64, "shared_secret")
+    access_token, _ = session.refresh_auth_tokens(steamid64)
+    return metadata, shared_secret, access_token, auth.SteamAuthClient()
 
 
 def _load_current_confirmations(
@@ -489,6 +575,52 @@ def _enroll_with_prompts(account_name: str | None = None) -> storage.AccountMeta
 def _cmd_login(args: argparse.Namespace) -> int:
     _login_and_store(args.account_name)
     return 0
+
+
+def _cmd_login_confirmations(args: argparse.Namespace) -> int:
+    _, _, access_token, client = _login_confirmation_context(args.steamid64)
+    current = client.get_login_confirmations(access_token)
+    if not current:
+        print("No pending login confirmations.")
+        return 0
+
+    for confirmation in current:
+        _print_login_confirmation_row(confirmation)
+    return 0
+
+
+def _cmd_respond_login(args: argparse.Namespace, *, confirm: bool) -> int:
+    with operation_lock.account_operation_lock(args.steamid64):
+        client_id = _parse_client_id(args.client_id)
+        metadata, shared_secret, access_token, client = _login_confirmation_context(args.steamid64)
+        confirmation = client.get_login_confirmation(access_token, client_id)
+        _print_login_confirmation_detail(metadata, confirmation)
+
+        action = "APPROVE" if confirm else "DENY"
+        noun = "approval" if confirm else "denial"
+        expected = f"{action} LOGIN {client_id}"
+        if input(f"Type {expected!r} to {action.casefold()} this login: ") != expected:
+            print(f"Login {noun} cancelled.")
+            return 1
+
+        client.respond_to_login_confirmation(
+            access_token,
+            args.steamid64,
+            shared_secret,
+            confirmation,
+            confirm=confirm,
+        )
+        past_tense = "Approved" if confirm else "Denied"
+        print(f"{past_tense} login {client_id}.")
+        return 0
+
+
+def _cmd_approve_login(args: argparse.Namespace) -> int:
+    return _cmd_respond_login(args, confirm=True)
+
+
+def _cmd_deny_login(args: argparse.Namespace) -> int:
+    return _cmd_respond_login(args, confirm=False)
 
 
 def _cmd_enroll(args: argparse.Namespace) -> int:
@@ -933,6 +1065,35 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     login.add_argument("account_name", nargs="?", metavar="ACCOUNT_NAME", help="Steam login name; prompts if omitted.")
     login.set_defaults(func=_cmd_login)
+
+    login_confirmations = subparsers.add_parser(
+        "login-confirmations",
+        help="List pending Steam login confirmations.",
+        description="Fetch pending Steam login approval requests for a stored account and show IP, location, platform, and device details.",
+        formatter_class=_HelpFormatter,
+    )
+    login_confirmations.add_argument("steamid64", metavar="STEAMID64", help="Stored account to query.")
+    login_confirmations.set_defaults(func=_cmd_login_confirmations)
+
+    approve_login = subparsers.add_parser(
+        "approve-login",
+        help="Approve one Steam login confirmation.",
+        description="Show a pending Steam login request, then approve it after exact typed consent.",
+        formatter_class=_HelpFormatter,
+    )
+    approve_login.add_argument("steamid64", metavar="STEAMID64", help="Stored account to use.")
+    approve_login.add_argument("client_id", metavar="CLIENT_ID", help="Client ID printed by the login-confirmations command.")
+    approve_login.set_defaults(func=_cmd_approve_login)
+
+    deny_login = subparsers.add_parser(
+        "deny-login",
+        help="Deny one Steam login confirmation.",
+        description="Show a pending Steam login request, then deny it after exact typed consent.",
+        formatter_class=_HelpFormatter,
+    )
+    deny_login.add_argument("steamid64", metavar="STEAMID64", help="Stored account to use.")
+    deny_login.add_argument("client_id", metavar="CLIENT_ID", help="Client ID printed by the login-confirmations command.")
+    deny_login.set_defaults(func=_cmd_deny_login)
 
     import_mafile = subparsers.add_parser(
         "import-mafile",
