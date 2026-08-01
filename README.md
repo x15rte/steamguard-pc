@@ -25,7 +25,7 @@ If `uv` says its tool bin directory is not on `PATH`:
 uv tool update-shell
 ```
 
-Then open a new shell. To update later:
+## Update
 
 ```powershell
 uv tool upgrade steamguard-pc
