@@ -138,15 +138,30 @@ class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
         super().start_section(heading)
 
 
+def _version_from_pyproject() -> str | None:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if not pyproject.is_file():
+        return None
+    try:
+        with pyproject.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    project = data.get("project")
+    if not isinstance(project, dict):
+        return None
+    version = project.get("version")
+    return version if isinstance(version, str) and version else None
+
+
 def _package_version() -> str:
+    pyproject_version = _version_from_pyproject()
+    if pyproject_version is not None:
+        return pyproject_version
     try:
         return importlib_metadata.version("steamguard-pc")
     except importlib_metadata.PackageNotFoundError:
-        pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-        with pyproject.open("rb") as handle:
-            data = tomllib.load(handle)
-        version = data.get("project", {}).get("version")
-        return str(version) if version is not None else "unknown"
+        return "unknown"
 
 
 def _invalid_choice_suggestion(parser: argparse.ArgumentParser, message: str) -> str | None:
@@ -178,69 +193,7 @@ class _ArgumentParser(argparse.ArgumentParser):
 HELP_DESCRIPTION = None
 
 
-HELP_EPILOG = """\
-Quick paths:
-  steamguard-pc setup
-      Guided first-run setup.
-
-  steamguard-pc accounts
-  steamguard-pc accounts --delete STEAMID64
-      List stored accounts, or delete one local account and its secrets after
-      exact typed consent.
-
-  steamguard-pc code STEAMID64 [--steam-time]
-      Print the current 5-character Steam Guard login code and seconds remaining.
-
-  steamguard-pc login-confirmations STEAMID64
-  steamguard-pc approve-login STEAMID64 CLIENT_ID
-  steamguard-pc deny-login    STEAMID64 CLIENT_ID
-      Review Steam login approval requests with IP/location/device details,
-      then approve or deny one after exact typed consent.
-
-  steamguard-pc confirmations STEAMID64
-      List pending mobile confirmations for a stored account.
-
-  steamguard-pc approve STEAMID64 CONFIRMATION_ID
-  steamguard-pc cancel  STEAMID64 CONFIRMATION_ID
-      Review one pending confirmation, show trade-offer details when available,
-      then submit after exact typed consent.
-
-  steamguard-pc approve-all STEAMID64
-  steamguard-pc cancel-all  STEAMID64
-      Review the current batch. approve-all submits only Trade and Market listing
-      confirmations; cancel-all submits every listed confirmation.
-
-  steamguard-pc login [ACCOUNT_NAME]
-  steamguard-pc set-cookies STEAMID64
-  steamguard-pc cookie-guide
-      Refresh Steam Community sessions or store browser cookies needed for
-      confirmations.
-
-  steamguard-pc import-mafile PATH
-  steamguard-pc find-mafiles [DIR ...]
-      Import Steam Desktop Authenticator files. Session tokens/cookies are used
-      when present; encrypted SDA files prompt for the SDA passkey.
-
-  steamguard-pc enroll [ACCOUNT_NAME]
-      Sign in, add a new mobile authenticator, store its secrets, and finalize with
-      Steam's activation code.
-
-  steamguard-pc remove-authenticator STEAMID64
-      Remove the mobile authenticator from Steam after exact typed consent,
-      then delete local authenticator secrets.
-
-  steamguard-pc revocation-code STEAMID64
-  steamguard-pc recovery-codes STEAMID64
-      Reveal the stored R##### revocation code, or create one-time Steam recovery
-      codes after exact typed consent.
-
-  steamguard-pc export-backup PATH [STEAMID64 ...] [--include-revocation-code]
-  steamguard-pc import-backup PATH [--replace]
-      Export or import encrypted SteamGuardPC backups after exact typed consent
-      and a backup passphrase.
-
-Run `steamguard-pc COMMAND -h` for command-specific options.
-"""
+HELP_EPILOG = None
 
 
 def _summary_text(summary: str | list[str] | None) -> str:

@@ -1,5 +1,7 @@
 import io
 import json
+import tomllib
+from pathlib import Path
 from contextlib import contextmanager
 
 import pytest
@@ -16,6 +18,12 @@ SDA_PASSKEY = "correct horse battery staple"
 SDA_SALT = "MTIzNDU2Nzg="
 SDA_IV = "MTIzNDU2Nzg5MGFiY2RlZg=="
 SDA_CIPHERTEXT = "q4/CnhwdcdRzn7l4L80qTkpyQEAgef8g09baxLG10KMPcav12ZNzruJneluSEKCCHlnyK/ju/J4kvtqeKCSrSc29SFc4pBlOXdJWxxZL8Vi6pm0abP6DlSpGTuHJAbKtVVP2iYCJvx9icvJw7tEnA1EpQiUIPHdn9yEQkU6CAgta3XdpBLl+vR3EfxeG9YGlOGZJzjnVKlfgzRRcRw660RUGT2s+pLMqQFa4ovB/szbqstAHnLKDVaRmnQXUCH6wwZovLYaflUoec+g1GGWOmBGKdANBedpz1xUUqP0SXeaucrYoLVb3LWat/HYEvGyzOiv+Hv8cMhEj0IK75MQ44w=="
+
+
+def _project_version() -> str:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    return str(data["project"]["version"])
 
 
 def test_code_timestamp_prints_deterministic_code(monkeypatch, capsys):
@@ -74,7 +82,7 @@ def test_top_level_help_is_descriptive(capsys):
     output = capsys.readouterr().out
     assert "SteamGuardPC manages Steam Guard accounts from a local Windows terminal." not in output
     assert "Authenticator secrets stay in Windows secret storage" not in output
-    assert "Quick paths:" in output
+    assert "Quick paths:" not in output
     assert "revocation-code" in output
     assert "remove-authenticator" in output
     assert "login-confirmations" in output
@@ -83,7 +91,7 @@ def test_top_level_help_is_descriptive(capsys):
     assert "commands:" in output
     assert "setup" in output
     assert "Guided first-run setup." in output
-    assert "Run `steamguard-pc COMMAND -h`" in output
+    assert "Use `steamguard-pc COMMAND -h`" in output
 
 
 def test_revocation_code_requires_exact_phrase(monkeypatch, keyring_store, capsys):
@@ -1429,14 +1437,43 @@ def test_color_option_can_override_no_color(monkeypatch, capsys):
     assert "\033[" in capsys.readouterr().out
 
 
-def test_version_flag_prints_package_version(capsys):
+def test_version_flag_prints_pyproject_version(capsys):
     with pytest.raises(SystemExit) as excinfo:
         cli.main(["--version"])
 
     assert excinfo.value.code == 0
     output = capsys.readouterr().out.strip()
-    assert output.startswith("steamguard-pc ")
-    assert output.endswith("0.1.0")
+    assert output == f"steamguard-pc {_project_version()}"
+
+
+def test_version_flag_prefers_pyproject_over_installed_metadata(monkeypatch, capsys):
+    def stale_distribution(name: str) -> str:
+        raise AssertionError(f"stale installed metadata should not be read for {name}")
+
+    monkeypatch.setattr(cli.importlib_metadata, "version", stale_distribution)
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--version"])
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out.strip()
+    assert output == f"steamguard-pc {_project_version()}"
+
+
+def test_version_flag_falls_back_to_installed_metadata(monkeypatch, capsys):
+    def installed_distribution(name: str) -> str:
+        assert name == "steamguard-pc"
+        return "9.8.7"
+
+    monkeypatch.setattr(cli, "_version_from_pyproject", lambda: None)
+    monkeypatch.setattr(cli.importlib_metadata, "version", installed_distribution)
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--version"])
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out.strip()
+    assert output == "steamguard-pc 9.8.7"
 
 
 def test_help_command_prints_command_help(capsys):

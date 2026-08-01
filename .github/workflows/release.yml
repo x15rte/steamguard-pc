@@ -3,12 +3,12 @@ name: Publish release
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag to create, e.g. v0.1.0. Must match pyproject.toml version."
+      version:
+        description: "Package version to release. Must match pyproject.toml project.version."
         required: true
         type: string
       title:
-        description: "Release title. Defaults to the tag."
+        description: "Release title. Defaults to v<version>."
         required: false
         type: string
       draft:
@@ -31,7 +31,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: release-v${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -75,15 +75,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build twine
 
-      - name: Validate tag matches package version
+      - name: Resolve release version
+        id: release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
-          version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
-          tag="${{ inputs.tag }}"
-          if [[ "$tag" != "v$version" ]]; then
-            echo "::error::Release tag '$tag' must match pyproject.toml version '$version' as 'v$version'."
+          pyproject_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
+          if [[ "$RELEASE_VERSION" != "$pyproject_version" ]]; then
+            echo "::error::Release version '$RELEASE_VERSION' must match pyproject.toml version '$pyproject_version'."
             exit 1
           fi
+          echo "version=$pyproject_version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$pyproject_version" >> "$GITHUB_OUTPUT"
 
       - name: Build distributions
         run: python -m build
@@ -94,14 +98,14 @@ jobs:
       - name: Upload distribution artifact
         uses: actions/upload-artifact@v4
         with:
-          name: python-distributions-${{ inputs.tag }}
+          name: python-distributions-${{ steps.release.outputs.tag }}
           path: dist/*
           if-no-files-found: error
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_TITLE: ${{ inputs.title }}
           RELEASE_DRAFT: ${{ inputs.draft }}
           RELEASE_PRERELEASE: ${{ inputs.prerelease }}
