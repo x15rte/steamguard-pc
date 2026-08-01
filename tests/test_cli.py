@@ -45,8 +45,9 @@ def test_top_level_help_is_descriptive(capsys):
 
     assert excinfo.value.code == 0
     output = capsys.readouterr().out
-    assert "SteamGuardPC is a Windows-focused Steam Guard helper." in output
-    assert "Common workflows:" in output
+    assert "SteamGuardPC manages Steam Guard accounts from a local Windows terminal." not in output
+    assert "Authenticator secrets stay in Windows secret storage" not in output
+    assert "Quick paths:" in output
     assert "revocation-code" in output
     assert "commands:" in output
     assert "setup" in output
