@@ -8,14 +8,29 @@ It is not affiliated with Valve or Steam.
 
 - Windows.
 - Python 3.11 or newer.
+- `uv` for installing the CLI from the GitHub repository.
 - A working `keyring` backend. The null backend is rejected; on Windows, `keyring` should use Windows secret storage.
 - Network access to Steam for sign-in, enrollment, token refresh, Steam-time sync, recovery-code creation, and confirmations.
 
 ## Install
 
+Install the command as an isolated `uv` tool:
+
 ```powershell
-python -m pip install .
+uv tool install git+https://github.com/x15rte/steamguard-pc.git
 steamguard-pc --help
+```
+
+Update an existing `uv` tool install:
+
+```powershell
+uv tool upgrade steamguard-pc
+```
+
+If `uv` warns that its tool bin directory is not on `PATH`, run:
+
+```powershell
+uv tool update-shell
 ```
 
 ## Quick start
