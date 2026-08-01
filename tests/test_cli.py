@@ -88,6 +88,7 @@ def test_top_level_help_is_descriptive(capsys):
     assert "login-confirmations" in output
     assert "approve-login" in output
     assert "deny-login" in output
+    assert "Control colored output: auto, always, or never (default: auto)." in output
     assert "commands:" in output
     assert "setup" in output
     assert "Guided first-run setup." in output
@@ -1367,7 +1368,7 @@ def test_cancel_requires_exact_cancel_phrase(monkeypatch, capsys):
     assert len(calls) == 1
     assert calls[0][1]["accept"] is False
     assert f"account: fixture ({STEAMID64})" in output
-    assert f"Cancelled abc.\n" in output
+    assert "Cancelled abc.\n" in output
 
 
 

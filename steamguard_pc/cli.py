@@ -1320,7 +1320,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--color",
         choices=sorted(COLOR_MODES),
         default="auto",
-        help="Control colored output: auto, always, or never.",
+        help="Control colored output: auto, always, or never (default: auto).",
     )
     parser.add_argument("--no-color", action="store_const", dest="color", const="never", help="Disable colored output.")
     subparsers = parser.add_subparsers(
