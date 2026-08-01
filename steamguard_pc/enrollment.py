@@ -142,10 +142,14 @@ class EnrollmentClient:
             if response.get("success") and not response.get("want_more"):
                 return
             if response.get("want_more") or status == 88:
-                try:
-                    next_timestamp = int(response.get("server_time")) + 30
-                except (TypeError, ValueError):
+                server_time = response.get("server_time")
+                if server_time is None:
                     next_timestamp = timestamp + 30
+                else:
+                    try:
+                        next_timestamp = int(server_time) + 30
+                    except (TypeError, ValueError):
+                        next_timestamp = timestamp + 30
                 continue
 
             raise EnrollmentError(f"Steam rejected finalize-authenticator request with status {status}")

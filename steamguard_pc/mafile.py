@@ -169,7 +169,7 @@ def parse_mafile(raw: dict[str, object]) -> ImportedSteamGuard:
     )
 
 
-def _load_sda_manifest_entry(path: Path) -> dict[str, object]:
+def _load_sda_manifest_entry(path: Path) -> dict[str, str]:
     manifest_path = path.parent / "manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -193,7 +193,7 @@ def _load_sda_manifest_entry(path: Path) -> dict[str, object]:
             iv = entry.get("encryption_iv")
             if not isinstance(salt, str) or not salt or not isinstance(iv, str) or not iv:
                 raise ValueError("encrypted SDA .maFile manifest entry is missing encryption_salt or encryption_iv")
-            return entry
+            return {"encryption_salt": salt, "encryption_iv": iv}
 
     raise ValueError("encrypted SDA .maFile is missing a matching manifest entry")
 

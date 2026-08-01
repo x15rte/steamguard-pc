@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8",
+  "pyright>=1.1.410",
   "requests-mock>=1.12",
 ]
 
@@ -24,3 +25,8 @@ steamguard-pc = "steamguard_pc.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.pyright]
+include = ["steamguard_pc", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"

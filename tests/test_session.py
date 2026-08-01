@@ -1,6 +1,7 @@
 import base64
 import json
 import pytest
+from typing import cast
 
 from steamguard_pc import auth, storage, session as session_module
 from steamguard_pc.session import SessionExpiredError, get_community_session, save_community_cookies
@@ -80,7 +81,7 @@ def test_refresh_auth_tokens_stores_renewed_tokens(keyring_store):
             assert refresh_token == "refresh-token"
             return "access-token", "new-refresh-token"
 
-    tokens = session_module.refresh_auth_tokens(STEAMID64, FakeAuthClient(), now=1700000000)
+    tokens = session_module.refresh_auth_tokens(STEAMID64, cast(auth.SteamAuthClient, FakeAuthClient()), now=1700000000)
 
     assert tokens == ("access-token", "new-refresh-token")
     assert keyring_store[(storage.SERVICE, f"{STEAMID64}:access_token")] == "access-token"

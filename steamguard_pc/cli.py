@@ -5,6 +5,7 @@ import sys
 import time
 from dataclasses import replace
 from pathlib import Path
+import requests
 
 from . import auth, backup, confirmations, enrollment, mafile, operation_lock, session, steam_time, storage
 from .auth import GuardAction, LoginResult, SteamAuthError
@@ -162,7 +163,7 @@ def _print_confirmation_detail(confirmation: Confirmation, account_label: str | 
 
 
 def _print_trade_offer_id(
-    community_session: object,
+    community_session: requests.Session,
     steamid64: str,
     device_id: str,
     identity_secret: str,
@@ -183,7 +184,7 @@ def _print_trade_offer_id(
 
 def _print_batch_confirmation_review(
     metadata: storage.AccountMetadata,
-    community_session: object,
+    community_session: requests.Session,
     identity_secret: str,
     confirmations_to_review: list[Confirmation],
 ) -> None:
@@ -231,7 +232,7 @@ def _selected_backup_ids(steamid64s: list[str]) -> list[str]:
     return selected_ids
 
 
-def _confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str, object]:
+def _confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str, requests.Session]:
     metadata = _account_metadata(steamid64)
     identity_secret = storage.get_required_secret(steamid64, "identity_secret")
     community_session = session.get_community_session(steamid64)
@@ -240,7 +241,7 @@ def _confirmation_context(steamid64: str) -> tuple[storage.AccountMetadata, str,
 
 def _load_current_confirmations(
     steamid64: str,
-) -> tuple[storage.AccountMetadata, str, object, list[Confirmation]]:
+) -> tuple[storage.AccountMetadata, str, requests.Session, list[Confirmation]]:
     metadata, identity_secret, community_session = _confirmation_context(steamid64)
     try:
         current = confirmations.get_confirmations(
@@ -260,7 +261,7 @@ def _load_current_confirmations(
     return metadata, identity_secret, community_session, current
 
 
-def _find_current_confirmation(steamid64: str, confirmation_id: str) -> tuple[storage.AccountMetadata, str, object, Confirmation]:
+def _find_current_confirmation(steamid64: str, confirmation_id: str) -> tuple[storage.AccountMetadata, str, requests.Session, Confirmation]:
     metadata, identity_secret, community_session, current = _load_current_confirmations(steamid64)
     target = next((item for item in current if item.id == confirmation_id), None)
     if target is None:
@@ -722,6 +723,8 @@ def _cmd_recovery_codes(args: argparse.Namespace) -> int:
         if not confirmation_code:
             raise ValueError("Steam recovery-code confirmation code is required")
         codes = client.create_emergency_codes(access_token, confirmation_code)
+    if codes is None:
+        raise EnrollmentError("Steam recovery-code response is missing codes")
 
     print(f"Steam recovery codes for {label}:")
     for code in codes:

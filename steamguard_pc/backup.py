@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from json import JSONDecodeError
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn, cast
 
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, hmac as crypto_hmac, padding
@@ -81,7 +81,7 @@ def unsafe_backup_path_warnings(path: str | Path) -> list[str]:
     return warnings
 
 
-def _malformed() -> None:
+def _malformed() -> NoReturn:
     raise BackupFormatError("SteamGuardPC backup is malformed")
 
 
@@ -195,7 +195,7 @@ def _verify_hmac_sha512(mac_key: bytes, payload: bytes, expected: bytes) -> None
 
 
 def _encrypt_aes256_cbc(plaintext: bytes, key: bytes, iv: bytes) -> bytes:
-    padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    padder = padding.PKCS7(AES_CBC_IV_BYTES * 8).padder()
     padded = padder.update(plaintext) + padder.finalize()
     encryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
     return encryptor.update(padded) + encryptor.finalize()
@@ -205,7 +205,7 @@ def _decrypt_aes256_cbc(ciphertext: bytes, key: bytes, iv: bytes) -> bytes:
     try:
         decryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
         padded = decryptor.update(ciphertext) + decryptor.finalize()
-        unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+        unpadder = padding.PKCS7(AES_CBC_IV_BYTES * 8).unpadder()
         return unpadder.update(padded) + unpadder.finalize()
     except ValueError as exc:
         raise BackupDecryptionError("backup passphrase is incorrect or backup file is corrupted") from exc
@@ -298,7 +298,7 @@ def _load_json_file(path: str | Path) -> Mapping[str, Any]:
     return raw
 
 
-def _decode_wrapper(path: str | Path) -> tuple[Mapping[str, object], bytes, bytes, bytes]:
+def _decode_wrapper(path: str | Path) -> tuple[Mapping[str, object], Mapping[str, object], bytes, bytes, bytes]:
     wrapper = _load_json_file(path)
     if (
         wrapper.get("format") != EXPORT_FORMAT
@@ -307,9 +307,10 @@ def _decode_wrapper(path: str | Path) -> tuple[Mapping[str, object], bytes, byte
     ):
         _malformed()
 
-    kdf = wrapper.get("kdf")
-    if not isinstance(kdf, dict):
+    kdf_raw = wrapper.get("kdf")
+    if not isinstance(kdf_raw, dict):
         _malformed()
+    kdf = cast(Mapping[str, object], kdf_raw)
     if kdf.get("algorithm") != KDF_ALGORITHM:
         _malformed()
 
@@ -318,12 +319,12 @@ def _decode_wrapper(path: str | Path) -> tuple[Mapping[str, object], bytes, byte
     expected_hmac = _decode_base64_field(wrapper, "hmac", 64)
     if len(ciphertext) == 0 or len(ciphertext) % AES_CBC_IV_BYTES != 0:
         _malformed()
-    return wrapper, iv, ciphertext, expected_hmac
+    return wrapper, kdf, iv, ciphertext, expected_hmac
 
 
 def _decrypt_plaintext(path: str | Path, passphrase: str) -> Mapping[str, Any]:
-    wrapper, iv, ciphertext, expected_hmac = _decode_wrapper(path)
-    encryption_key, mac_key = _derive_keys(passphrase, wrapper["kdf"])
+    wrapper, kdf, iv, ciphertext, expected_hmac = _decode_wrapper(path)
+    encryption_key, mac_key = _derive_keys(passphrase, kdf)
     try:
         _verify_hmac_sha512(mac_key, _authenticated_payload(wrapper), expected_hmac)
     except InvalidSignature as exc:
@@ -349,6 +350,7 @@ def _decrypt_plaintext(path: str | Path, passphrase: str) -> Mapping[str, Any]:
 def _account_from_backup(raw: object) -> tuple[AccountMetadata, dict[str, str]]:
     if not isinstance(raw, dict):
         _malformed()
+    raw = cast(Mapping[str, object], raw)
 
     steamid64 = _string_field(raw, "steamid64")
     metadata = AccountMetadata(

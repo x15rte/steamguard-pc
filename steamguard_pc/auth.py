@@ -4,11 +4,12 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from requests.cookies import RequestsCookieJar
 from urllib.parse import quote
 
 import requests
 
-from ._protobuf import Field, decode_message, encode_message, encode_nested
+from ._protobuf import Field, WireType, decode_message, encode_message, encode_nested
 
 
 AUTH_SERVICE_URL = "https://api.steampowered.com/IAuthenticationService/{method}/v1/"
@@ -175,6 +176,8 @@ def jwt_subject(token: str) -> str:
 
 def jwt_expiration(token: str) -> int | None:
     expiration = decode_jwt_payload(token).get("exp")
+    if expiration is None:
+        return None
     try:
         return int(expiration)
     except (TypeError, ValueError):
@@ -194,7 +197,7 @@ def web_login_from_access_token(steamid64: str, access_token: str, sessionid: st
 def generate_sessionid() -> str:
     return secrets.token_hex(12)
 
-def _cookie_value(cookies: requests.cookies.RequestsCookieJar, name: str, domain: str | None = None) -> str | None:
+def _cookie_value(cookies: RequestsCookieJar, name: str, domain: str | None = None) -> str | None:
     if domain is not None:
         for cookie in cookies:
             if cookie.name == name and cookie.domain.lstrip(".") == domain:
@@ -319,7 +322,7 @@ class SteamAuthClient:
                 (4, "varint", MOBILE_GAMING_DEVICE_TYPE),
             ],
         )
-        fields: list[tuple[int, str, object]] = [
+        fields: list[tuple[int, WireType, Any]] = [
             (1, "length", "SteamGuardPC"),
             (2, "length", account_name),
             (3, "length", encrypted_password),
@@ -539,4 +542,8 @@ def _coerce_bytes(value: object) -> bytes:
         return value
     if isinstance(value, str):
         return value.encode("utf-8")
-    return bytes(value)
+    if isinstance(value, bytearray):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    raise TypeError("expected bytes-like value")

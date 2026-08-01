@@ -114,11 +114,12 @@ def confirmation_from_api(raw: dict[str, object]) -> Confirmation:
     if not isinstance(creation_time, int):
         creation_time = None
 
+    raw_type = raw.get("type")
     return Confirmation(
         id=confirmation_id,
         nonce=nonce,
         creator_id=str(raw["creator_id"]) if raw.get("creator_id") is not None else None,
-        type=raw.get("type") if isinstance(raw.get("type"), (str, int)) else None,
+        type=raw_type if isinstance(raw_type, (str, int)) else None,
         type_name=str(raw["type_name"]) if raw.get("type_name") is not None else None,
         headline=str(raw["headline"]) if raw.get("headline") is not None else None,
         summary=summary,
@@ -266,7 +267,7 @@ def _request_batch_with_attempts(
     last_error: ConfirmationError | None = None
     all_invalid_keys = True
     for tag, mobile_client, headers in attempts:
-        data: dict[str, object] = confirmation_params(
+        base_params: Mapping[str, object] = confirmation_params(
             steamid64,
             device_id,
             identity_secret_b64,
@@ -274,6 +275,7 @@ def _request_batch_with_attempts(
             timestamp,
             mobile_client,
         )
+        data: dict[str, object] = dict(base_params)
         data.update(extra_data)
         try:
             return _request_post_json(session, MULTIAJAXOP_URL, data, headers)
