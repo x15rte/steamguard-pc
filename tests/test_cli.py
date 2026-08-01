@@ -121,6 +121,18 @@ def test_revocation_code_prints_after_exact_phrase(monkeypatch, keyring_store, c
     assert f"Steam Guard revocation code for fixture ({STEAMID64}): {REVOCATION_CODE}" in output
 
 
+def test_revocation_code_escapes_terminal_control_sequences(monkeypatch, keyring_store, capsys):
+    cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture"))
+    cli.storage.put_secret(STEAMID64, "revocation_code", "R12345\x1b[2J")
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"SHOW REVOCATION CODE {STEAMID64}\n"))
+
+    assert cli.main(["revocation-code", STEAMID64]) == 0
+
+    output = capsys.readouterr().out
+    assert "R12345\\x1b[2J" in output
+    assert "\x1b" not in output
+
+
 
 def test_remove_authenticator_requires_exact_phrase(monkeypatch, keyring_store, capsys):
     cli.storage.upsert_account(AccountMetadata(steamid64=STEAMID64, account_name="fixture"))
@@ -1533,3 +1545,148 @@ def test_help_command_suggests_unknown_command(capsys):
     assert cli.main(["help", "cod"]) == 1
 
     assert "Did you mean 'code'?" in capsys.readouterr().err
+
+
+def test_display_text_escapes_control_and_bidi_characters():
+    assert cli._display_text(None) == "-"
+    assert cli._display_text("") == "-"
+    assert cli._display_text([]) == "-"
+    assert cli._display_text(["a\x1b[31mb", "c\u202e"]) == "a\\x1b[31mb; c\\u202e"
+    assert cli._display_text("line\nnext\tend") == "line\\nnext\\tend"
+    assert cli._display_text("clean") == "clean"
+
+
+def test_confirmations_escape_terminal_control_sequences(monkeypatch, capsys):
+    target = Confirmation(
+        id="abc\x1b[31m",
+        nonce="nonce",
+        creator_id="creator\x07",
+        type_name="Trade\u202e",
+        headline="Trade\nOffer",
+        summary=["Summary\tOne", "Summary\x1bTwo"],
+    )
+    monkeypatch.setattr(
+        cli.storage,
+        "load_accounts",
+        lambda: {STEAMID64: AccountMetadata(steamid64=STEAMID64, account_name="fixture", device_id="android:fixture")},
+    )
+    monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: "identity-secret")
+    monkeypatch.setattr(cli.session, "get_community_session", lambda steamid64: object())
+    monkeypatch.setattr(cli.confirmations, "get_confirmations", lambda *args, **kwargs: [target])
+
+    assert cli.main(["confirmations", STEAMID64]) == 0
+
+    output = capsys.readouterr().out
+    assert "\\x1b" in output
+    assert "\\x07" in output
+    assert "\\n" in output
+    assert "\\t" in output
+    assert "\\u202e" in output
+    assert "\x1b" not in output
+
+
+def test_login_confirmations_escape_terminal_control_sequences(monkeypatch, keyring_store, capsys):
+    _seed_login_confirmation_account()
+
+    class FakeClient:
+        def get_login_confirmations(self, access_token):
+            assert access_token == "access-token"
+            return [
+                cli.auth.LoginConfirmation(
+                    client_id=123,
+                    version=2,
+                    ip="203.0.113.\x1b10",
+                    city="Seattle\n",
+                    state="W\tA",
+                    country="US",
+                    platform_type=2,
+                    device_friendly_name="Firefox\x1b on Windows",
+                )
+            ]
+
+    _patch_login_confirmation_context(monkeypatch, FakeClient())
+
+    assert cli.main(["login-confirmations", STEAMID64]) == 0
+
+    output = capsys.readouterr().out
+    assert "\\x1b" in output
+    assert "\\n" in output
+    assert "\\t" in output
+    assert "\x1b" not in output
+
+
+def test_accounts_list_escapes_terminal_control_sequences(keyring_store, capsys):
+    cli.storage.upsert_account(
+        AccountMetadata(
+            steamid64=STEAMID64,
+            account_name="fixture\x1b[31m",
+            device_id="android:\x1bfixture",
+        )
+    )
+
+    assert cli.main(["accounts"]) == 0
+
+    output = capsys.readouterr().out
+    assert "fixture\\x1b[31m" in output
+    assert "android:\\x1bfixture" in output
+    assert "\x1b" not in output
+
+
+def test_main_error_escapes_terminal_control_sequences(monkeypatch, capsys):
+    def fail(args):
+        raise ValueError("bad \x1b[31mvalue")
+
+    monkeypatch.setattr(cli, "_cmd_cookie_guide", fail)
+
+    assert cli.main(["cookie-guide"]) == 1
+
+    captured = capsys.readouterr()
+    assert "bad \\x1b[31mvalue" in captured.err
+    assert "\x1b" not in captured.err
+
+
+def test_import_mafile_escapes_terminal_control_sequences_from_account_name(tmp_path, keyring_store, capsys):
+    mafile_path = tmp_path / "account.maFile"
+    mafile_path.write_text(
+        json.dumps(
+            {
+                "steamid": STEAMID64,
+                "account_name": "fixture\x1b[31m",
+                "shared_secret": SHARED_SECRET,
+                "identity_secret": IDENTITY_SECRET,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert cli.main(["import-mafile", str(mafile_path)]) == 0
+
+    output = capsys.readouterr().out
+    assert f"Imported fixture\\x1b[31m ({STEAMID64})" in output
+    assert "\x1b" not in output
+
+
+def test_confirmations_json_preserves_control_characters_as_json(monkeypatch, capsys):
+    target = Confirmation(
+        id="abc",
+        nonce="nonce",
+        creator_id="creator",
+        type_name="Trade",
+        headline="Trade \x1bOffer",
+        summary="Summary",
+    )
+    monkeypatch.setattr(
+        cli.storage,
+        "load_accounts",
+        lambda: {STEAMID64: AccountMetadata(steamid64=STEAMID64, account_name="fixture", device_id="android:fixture")},
+    )
+    monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: "identity-secret")
+    monkeypatch.setattr(cli.session, "get_community_session", lambda steamid64: object())
+    monkeypatch.setattr(cli.confirmations, "get_confirmations", lambda *args, **kwargs: [target])
+
+    assert cli.main(["confirmations", STEAMID64, "--json"]) == 0
+
+    output = capsys.readouterr().out
+    assert json.loads(output)[0]["headline"] == "Trade \x1bOffer"
+    assert "\\u001b" in output
+    assert "\x1b" not in output

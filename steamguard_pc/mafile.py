@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from . import storage
 from .crypto import generate_device_id, validate_base64_secret
 from .models import ImportedSteamGuard
 
@@ -126,10 +127,10 @@ def _steamid64_from(raw: dict[str, object]) -> str:
     else:
         value = ""
 
-    steamid64 = str(value)
-    if not steamid64.isdecimal() or len(steamid64) < 16:
-        raise ValueError("missing SteamID64")
-    return steamid64
+    try:
+        return storage.validate_steamid64(str(value))
+    except ValueError:
+        raise ValueError("missing SteamID64") from None
 
 
 def parse_mafile(raw: dict[str, object]) -> ImportedSteamGuard:

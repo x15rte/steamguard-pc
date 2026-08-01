@@ -13,6 +13,7 @@ class OperationLockError(RuntimeError):
 
 
 def lock_path(steamid64: str) -> Path:
+    steamid64 = storage.validate_steamid64(steamid64)
     return storage.config_dir() / "locks" / f"{steamid64}.lock"
 
 

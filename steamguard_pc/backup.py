@@ -352,7 +352,10 @@ def _account_from_backup(raw: object) -> tuple[AccountMetadata, dict[str, str]]:
         _malformed()
     raw = cast(Mapping[str, object], raw)
 
-    steamid64 = _string_field(raw, "steamid64")
+    try:
+        steamid64 = storage.validate_steamid64(_string_field(raw, "steamid64"))
+    except ValueError:
+        _malformed()
     metadata = AccountMetadata(
         steamid64=steamid64,
         account_name=_optional_string_field(raw, "account_name"),

@@ -14,6 +14,9 @@ APP_NAME = "steamguard-pc"
 SERVICE = APP_NAME
 CONFIG_ENV_VAR = "STEAMGUARD_PC_CONFIG_DIR"
 CONFIG_SCHEMA_VERSION = 1
+STEAMID64_MIN_LENGTH = 16
+STEAMID64_MAX_LENGTH = 20
+STEAMID64_MAX_VALUE = 0xFFFFFFFFFFFFFFFF
 SECRET_FIELDS = {
     "shared_secret",
     "identity_secret",
@@ -71,10 +74,22 @@ def config_dir() -> Path:
 def config_path() -> Path:
     return config_dir() / "config.json"
 
+def validate_steamid64(steamid64: str) -> str:
+    if (
+        isinstance(steamid64, str)
+        and steamid64.isascii()
+        and steamid64.isdecimal()
+        and STEAMID64_MIN_LENGTH <= len(steamid64) <= STEAMID64_MAX_LENGTH
+        and int(steamid64) <= STEAMID64_MAX_VALUE
+    ):
+        return steamid64
+    raise ValueError(f"invalid SteamID64: {steamid64!a}")
+
 
 def secret_name(steamid64: str, field: str) -> str:
     if field not in SECRET_FIELDS:
         raise ValueError(f"unsupported secret field: {field}")
+    steamid64 = validate_steamid64(steamid64)
     return f"{steamid64}:{field}"
 
 
@@ -129,6 +144,10 @@ def load_accounts() -> dict[str, AccountMetadata]:
         steamid64 = item.get("steamid64")
         if not isinstance(steamid64, str) or not steamid64:
             continue
+        try:
+            steamid64 = validate_steamid64(steamid64)
+        except ValueError:
+            continue
         accounts[steamid64] = AccountMetadata(
             steamid64=steamid64,
             account_name=item.get("account_name") if isinstance(item.get("account_name"), str) else None,
@@ -144,13 +163,16 @@ def load_accounts() -> dict[str, AccountMetadata]:
 
 def save_accounts(accounts: dict[str, AccountMetadata]) -> None:
     path = config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
     account_rows = []
     for metadata in sorted(accounts.values(), key=lambda account: account.steamid64):
+        steamid64 = validate_steamid64(metadata.steamid64)
         row = asdict(metadata)
+        row["steamid64"] = steamid64
         for field in SECRET_FIELDS:
             row.pop(field, None)
         account_rows.append(row)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = {
         "version": CONFIG_SCHEMA_VERSION,
@@ -160,12 +182,14 @@ def save_accounts(accounts: dict[str, AccountMetadata]) -> None:
 
 
 def upsert_account(metadata: AccountMetadata) -> None:
+    steamid64 = validate_steamid64(metadata.steamid64)
     accounts = load_accounts()
-    accounts[metadata.steamid64] = metadata
+    accounts[steamid64] = metadata
     save_accounts(accounts)
 
 
 def delete_account(steamid64: str) -> AccountMetadata:
+    steamid64 = validate_steamid64(steamid64)
     accounts = load_accounts()
     metadata = accounts.pop(steamid64, None)
     if metadata is None:
@@ -177,6 +201,7 @@ def delete_account(steamid64: str) -> AccountMetadata:
     return metadata
 
 def delete_authenticator_secrets(steamid64: str) -> None:
+    steamid64 = validate_steamid64(steamid64)
     accounts = load_accounts()
     if steamid64 not in accounts:
         raise KeyError(f"missing account metadata for {steamid64}")
@@ -186,8 +211,9 @@ def delete_authenticator_secrets(steamid64: str) -> None:
 
 
 def store_imported_guard(imported: ImportedSteamGuard) -> AccountMetadata:
-    put_secret(imported.steamid64, "shared_secret", imported.shared_secret)
-    put_secret(imported.steamid64, "identity_secret", imported.identity_secret)
+    steamid64 = validate_steamid64(imported.steamid64)
+    put_secret(steamid64, "shared_secret", imported.shared_secret)
+    put_secret(steamid64, "identity_secret", imported.identity_secret)
 
     optional_secrets = {
         "revocation_code": imported.revocation_code,
@@ -201,10 +227,10 @@ def store_imported_guard(imported: ImportedSteamGuard) -> AccountMetadata:
     }
     for field, value in optional_secrets.items():
         if value:
-            put_secret(imported.steamid64, field, value)
+            put_secret(steamid64, field, value)
 
     metadata = AccountMetadata(
-        steamid64=imported.steamid64,
+        steamid64=steamid64,
         account_name=imported.account_name,
         device_id=imported.device_id,
         last_imported_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

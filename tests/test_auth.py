@@ -301,6 +301,55 @@ def test_finalize_web_login_posts_nonce_follows_transfers_and_reads_community_co
     }
 
 
+@pytest.mark.parametrize(
+    "transfer_url",
+    [
+        "http://steamcommunity.com/login/transfer",
+        "https://evil.example.com/login/transfer",
+        "https://steamcommunity.com.evil.example/login/transfer",
+        "https://user:pass@steamcommunity.com/login/transfer",
+        "https://steamcommunity.com:8443/login/transfer",
+        "https://[::1/login/transfer",
+    ],
+)
+def test_finalize_web_login_rejects_untrusted_transfer_url(requests_mock, transfer_url):
+    client = auth.SteamAuthClient()
+    requests_mock.post(
+        auth.LOGIN_FINALIZE_URL,
+        json={
+            "steamID": STEAMID64,
+            "transfer_info": [{"url": transfer_url, "params": {"nonce": "transfer-nonce"}}],
+        },
+    )
+
+    with pytest.raises(auth.SteamAuthResponseError) as excinfo:
+        client.finalize_web_login("refresh-token")
+
+    assert str(excinfo.value) == "Steam web-login finalization returned an untrusted transfer URL"
+    assert len(requests_mock.request_history) == 1
+
+
+def test_finalize_web_login_does_not_follow_transfer_redirect(requests_mock):
+    client = auth.SteamAuthClient()
+    transfer_url = "https://steamcommunity.com/login/transfer"
+    evil_url = "https://evil.example.com/collect"
+    requests_mock.post(
+        auth.LOGIN_FINALIZE_URL,
+        json={
+            "steamID": STEAMID64,
+            "transfer_info": [{"url": transfer_url, "params": {"nonce": "transfer-nonce"}}],
+        },
+    )
+    requests_mock.post(transfer_url, status_code=307, headers={"Location": evil_url})
+    requests_mock.post(evil_url, text="collected")
+
+    with pytest.raises(auth.SteamAuthTransportError) as excinfo:
+        client.finalize_web_login("refresh-token")
+
+    assert str(excinfo.value) == "Steam web-login finalization failed"
+    assert [request.url for request in requests_mock.request_history] == [auth.LOGIN_FINALIZE_URL, transfer_url]
+
+
 def test_refresh_access_token_uses_refresh_token_subject(monkeypatch):
     client = auth.SteamAuthClient()
     token = "header.eyJzdWIiOiAiNzY1NjExOTc5NjAyODc5MzAifQ.signature"

@@ -196,3 +196,10 @@ def test_export_backup_refuses_overwrite_without_force(monkeypatch, tmp_path, ke
         backup.export_accounts(path, PASSPHRASE, overwrite=False)
 
     assert str(excinfo.value) == f"backup file already exists: {path}"
+
+
+def test_account_from_backup_rejects_invalid_steamid64():
+    with pytest.raises(backup.BackupFormatError) as excinfo:
+        backup._account_from_backup({"steamid64": "..\\..\\evil", "secrets": {}})
+
+    assert str(excinfo.value) == "steamguard-pc backup is malformed"

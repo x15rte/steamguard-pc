@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 from requests.cookies import RequestsCookieJar
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
@@ -47,6 +47,7 @@ COMMUNITY_HOME_REDIRECT = "https://steamcommunity.com/login/home/?goto="
 COMMUNITY_DOMAIN = "steamcommunity.com"
 STORE_DOMAIN = "store.steampowered.com"
 HELP_DOMAIN = "help.steampowered.com"
+_TRANSFER_ALLOWED_HOSTS = frozenset({COMMUNITY_DOMAIN, STORE_DOMAIN, HELP_DOMAIN, "login.steampowered.com"})
 
 
 GUARD_TYPE_NAMES = {
@@ -258,6 +259,13 @@ def _cookie_value(cookies: RequestsCookieJar, name: str, domain: str | None = No
             return cookie.value
     return None
 
+def _transfer_url_is_trusted(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    return parsed.scheme.casefold() == "https" and parsed.netloc.casefold() in _TRANSFER_ALLOWED_HOSTS
+
 
 def encrypt_password(publickey_mod_hex: str, publickey_exp_hex: str, password: str) -> str:
     modulus = int(publickey_mod_hex, 16)
@@ -319,10 +327,12 @@ class SteamAuthClient:
             params = item.get("params")
             if not isinstance(url, str) or not isinstance(params, Mapping):
                 continue
+            if not _transfer_url_is_trusted(url):
+                raise SteamAuthResponseError("Steam web-login finalization returned an untrusted transfer URL")
             transfer_data = dict(params)
             transfer_data["steamID"] = steamid64
             try:
-                transfer_response = self.http.post(url, data=transfer_data, timeout=REQUEST_TIMEOUT)
+                transfer_response = self.http.post(url, data=transfer_data, timeout=REQUEST_TIMEOUT, allow_redirects=False)
             except requests.exceptions.RequestException as exc:
                 raise SteamAuthTransportError("Steam web-login finalization failed") from exc
             if transfer_response.status_code < 200 or transfer_response.status_code >= 300:

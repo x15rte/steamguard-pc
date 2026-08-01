@@ -5,6 +5,7 @@ import pytest
 
 from steamguard_pc import storage
 from steamguard_pc.mafile import EncryptedMaFileRequiresPasskey, MaFileDecryptionError, find_mafile_candidates, load_mafile, parse_mafile
+from steamguard_pc.models import ImportedSteamGuard
 
 
 SHARED_SECRET = "MDEyMzQ1Njc4OWFiY2RlZmdoaWo="
@@ -153,6 +154,9 @@ def test_parse_mafile_generates_device_id_when_missing():
     ("raw", "message"),
     [
         ({"shared_secret": SHARED_SECRET, "identity_secret": IDENTITY_SECRET}, "missing SteamID64"),
+        ({"steamid": "..\\..\\evil", "shared_secret": SHARED_SECRET, "identity_secret": IDENTITY_SECRET}, "missing SteamID64"),
+        ({"steamid": "１２３４５６７８９０１２３４５６", "shared_secret": SHARED_SECRET, "identity_secret": IDENTITY_SECRET}, "missing SteamID64"),
+        ({"steamid": "18446744073709551616", "shared_secret": SHARED_SECRET, "identity_secret": IDENTITY_SECRET}, "missing SteamID64"),
         ({"steamid": STEAMID64, "identity_secret": IDENTITY_SECRET}, "missing shared_secret"),
         ({"steamid": STEAMID64, "shared_secret": SHARED_SECRET}, "missing identity_secret"),
         ({"steamid": STEAMID64, "shared_secret": "not base64", "identity_secret": IDENTITY_SECRET}, "invalid shared_secret"),
@@ -162,6 +166,60 @@ def test_parse_mafile_rejects_invalid_inputs(raw, message):
     with pytest.raises(ValueError, match=f"^{message}$"):
         parse_mafile(raw)
 
+
+def test_load_accounts_skips_invalid_steamid64_rows(keyring_store):
+    config = {
+        "version": storage.CONFIG_SCHEMA_VERSION,
+        "accounts": [
+            {"steamid64": STEAMID64, "account_name": "valid", "device_id": "android:fixture"},
+            {"steamid64": "..\\..\\evil", "account_name": "traversal"},
+            {"steamid64": "１２３４５６７８９０１２３４５６", "account_name": "non-ascii"},
+            {"steamid64": "18446744073709551616", "account_name": "overflow"},
+        ],
+    }
+    storage.config_path().parent.mkdir(parents=True, exist_ok=True)
+    storage.config_path().write_text(json.dumps(config), encoding="utf-8")
+
+    accounts = storage.load_accounts()
+
+    assert list(accounts) == [STEAMID64]
+    assert accounts[STEAMID64].account_name == "valid"
+
+
+def test_save_accounts_rejects_invalid_steamid64(keyring_store):
+    with pytest.raises(ValueError, match="invalid SteamID64"):
+        storage.save_accounts({"bad": storage.AccountMetadata(steamid64="..\\..\\evil")})
+
+    assert not storage.config_path().exists()
+
+
+def test_upsert_account_rejects_invalid_steamid64(keyring_store):
+    with pytest.raises(ValueError, match="invalid SteamID64"):
+        storage.upsert_account(storage.AccountMetadata(steamid64="..\\..\\evil"))
+
+    assert not storage.config_path().exists()
+
+
+def test_put_secret_rejects_invalid_steamid64(keyring_store):
+    with pytest.raises(ValueError, match="invalid SteamID64"):
+        storage.put_secret("..\\..\\evil", "shared_secret", SHARED_SECRET)
+
+    assert keyring_store == {}
+
+
+def test_store_imported_guard_rejects_invalid_steamid64_before_writing(keyring_store):
+    imported = ImportedSteamGuard(
+        account_name="fixture",
+        steamid64="..\\..\\evil",
+        shared_secret=SHARED_SECRET,
+        identity_secret=IDENTITY_SECRET,
+    )
+
+    with pytest.raises(ValueError, match="invalid SteamID64"):
+        storage.store_imported_guard(imported)
+
+    assert keyring_store == {}
+    assert not storage.config_path().exists()
 
 def test_store_imported_guard_keeps_secrets_out_of_config(keyring_store):
     imported = parse_mafile(valid_mafile())
