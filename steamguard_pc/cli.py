@@ -1,9 +1,14 @@
 import argparse
+import tomllib
+import difflib
+import json
 import getpass
+import re
 import os
 import sys
 import time
 from dataclasses import replace
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 import requests
 
@@ -40,9 +45,95 @@ Treat both values like passwords. Do not paste them into chat, logs, screenshots
 """
 
 
+ANSI_RESET = "\033[0m"
+COLOR_HEADING = "1;36"
+COLOR_ERROR = "1;31"
+COLOR_INTERRUPT = "1;33"
+COLOR_MODES = {"auto", "always", "never"}
+_COLOR_MODE: str | None = None
+
+
+def _argv_color_mode(argv: list[str] | None) -> str | None:
+    arguments = sys.argv[1:] if argv is None else argv
+    for index, argument in enumerate(arguments):
+        if argument == "--no-color":
+            return "never"
+        if argument == "--color" and index + 1 < len(arguments) and arguments[index + 1] in COLOR_MODES:
+            return arguments[index + 1]
+        if argument.startswith("--color="):
+            value = argument.split("=", 1)[1]
+            if value in COLOR_MODES:
+                return value
+    return None
+
+
+
+
+def _color_enabled(stream) -> bool:
+    if _COLOR_MODE == "never":
+        return False
+    if _COLOR_MODE == "always":
+        return True
+    if os.environ.get("NO_COLOR") is not None:
+        return False
+    forced = os.environ.get("FORCE_COLOR") or os.environ.get("CLICOLOR_FORCE")
+    if forced and forced != "0":
+        return True
+    isatty = getattr(stream, "isatty", None)
+    return bool(isatty and isatty())
+
+
+def _color(text: str, code: str, stream) -> str:
+    if not _color_enabled(stream):
+        return text
+    return f"\033[{code}m{text}{ANSI_RESET}"
+
+
 class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, max_help_position=36, width=100, **kwargs)
+
+    def start_section(self, heading: str | None) -> None:
+        if heading is not None:
+            heading = _color(heading, COLOR_HEADING, sys.stdout)
+        super().start_section(heading)
+
+
+def _package_version() -> str:
+    try:
+        return importlib_metadata.version("steamguard-pc")
+    except importlib_metadata.PackageNotFoundError:
+        pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        with pyproject.open("rb") as handle:
+            data = tomllib.load(handle)
+        version = data.get("project", {}).get("version")
+        return str(version) if version is not None else "unknown"
+
+
+def _invalid_choice_suggestion(parser: argparse.ArgumentParser, message: str) -> str | None:
+    match = re.search(r"invalid choice: '([^']+)'", message)
+    if match is None:
+        return None
+
+    invalid_value = match.group(1)
+    choices: list[str] = []
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            choices.extend(str(choice) for choice in action.choices)
+        elif action.choices is not None:
+            choices.extend(str(choice) for choice in action.choices)
+
+    matches = difflib.get_close_matches(invalid_value, choices, n=1, cutoff=0.55)
+    return matches[0] if matches else None
+
+
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        suggestion = _invalid_choice_suggestion(self, message)
+        if suggestion is not None:
+            message = f"{message}\nDid you mean '{suggestion}'?"
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{_color(f'{self.prog}: error:', COLOR_ERROR, sys.stderr)} {message}\n")
 
 
 HELP_DESCRIPTION = None
@@ -631,6 +722,7 @@ def _cmd_enroll(args: argparse.Namespace) -> int:
     _enroll_with_prompts(args.account_name)
     return 0
 
+
 def _delete_account_with_consent(steamid64: str) -> int:
     with operation_lock.account_operation_lock(steamid64):
         metadata = storage.load_accounts().get(steamid64)
@@ -656,11 +748,29 @@ def _cmd_accounts(args: argparse.Namespace) -> int:
         return _delete_account_with_consent(args.delete)
 
     accounts = storage.load_accounts()
-    if not accounts:
+    sorted_accounts = sorted(accounts.values(), key=lambda account: account.steamid64)
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "steamid64": metadata.steamid64,
+                        "account_name": metadata.account_name,
+                        "device_id": metadata.device_id,
+                        "last_imported_at": metadata.last_imported_at,
+                    }
+                    for metadata in sorted_accounts
+                ],
+                indent=2,
+            )
+        )
+        return 0
+
+    if not sorted_accounts:
         print("No accounts imported.")
         return 0
 
-    for metadata in sorted(accounts.values(), key=lambda account: account.steamid64):
+    for metadata in sorted_accounts:
         print(
             "\t".join(
                 [
@@ -806,14 +916,37 @@ def _cmd_code(args: argparse.Namespace) -> int:
         timestamp = int(time.time())
     shared_secret = storage.get_required_secret(args.steamid64, "shared_secret")
     code = steam_totp(shared_secret, timestamp)
-    remaining = seconds_remaining(timestamp)
-    print(f"{code} expires_in={remaining}s")
-    print("Clock must be synchronized with Steam; sync Windows time if Steam rejects this code.")
+    if args.plain:
+        print(code)
+    else:
+        remaining = seconds_remaining(timestamp)
+        print(f"{code} expires_in={remaining}s")
+        print("Clock must be synchronized with Steam; sync Windows time if Steam rejects this code.")
     return 0
 
 
 def _cmd_confirmations(args: argparse.Namespace) -> int:
     _, _, _, current = _load_current_confirmations(args.steamid64)
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "id": confirmation.id,
+                        "creator_id": confirmation.creator_id,
+                        "type": confirmation.type,
+                        "type_name": confirmation.type_name,
+                        "headline": confirmation.headline,
+                        "summary": confirmation.summary,
+                        "creation_time": confirmation.creation_time,
+                    }
+                    for confirmation in current
+                ],
+                indent=2,
+            )
+        )
+        return 0
+
     if not current:
         print("No pending confirmations.")
         return 0
@@ -1033,13 +1166,169 @@ def _cmd_cancel_all(args: argparse.Namespace) -> int:
     return _cmd_batch_confirm(args, accept=False)
 
 
+def _parser_command_names(parser: argparse.ArgumentParser) -> list[str]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return sorted(str(command) for command in action.choices)
+    return []
+
+
+def _parser_command_parsers(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return dict(action.choices)
+    return {}
+
+
+def _parser_global_options(parser: argparse.ArgumentParser) -> list[str]:
+    global_options: set[str] = set()
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            continue
+        global_options.update(action.option_strings)
+    return sorted(global_options)
+
+
+def _parser_command_options(parser: argparse.ArgumentParser) -> dict[str, list[str]]:
+    options: dict[str, list[str]] = {}
+    for command, command_parser in _parser_command_parsers(parser).items():
+        command_options: set[str] = set()
+        for action in command_parser._actions:
+            command_options.update(action.option_strings)
+        options[command] = sorted(command_options)
+    return options
+
+
+def _shell_words(words: list[str]) -> str:
+    return " ".join(words)
+
+
+def _powershell_words(words: list[str]) -> str:
+    return ", ".join(f"'{word}'" for word in words)
+
+
+def _completion_script(
+    shell: str,
+    commands: list[str],
+    global_options: list[str],
+    command_options: dict[str, list[str]],
+) -> str:
+    top_level_words = _shell_words([*global_options, *commands])
+    color_words = _shell_words(sorted(COLOR_MODES))
+    if shell == "bash":
+        option_cases = "\n".join(
+            f'    {command}) COMPREPLY=( $(compgen -W "{_shell_words(options)}" -- "$cur") ) ;;'
+            for command, options in command_options.items()
+        )
+        return f"""_steamguard_pc_complete() {{
+  local cur="${{COMP_WORDS[COMP_CWORD]}}"
+  if [[ ${{COMP_CWORD}} -gt 1 && "${{COMP_WORDS[COMP_CWORD-1]}}" == "--color" ]]; then
+    COMPREPLY=( $(compgen -W "{color_words}" -- "$cur") )
+    return
+  fi
+  if [[ ${{COMP_CWORD}} -eq 1 ]]; then
+    COMPREPLY=( $(compgen -W "{top_level_words}" -- "$cur") )
+    return
+  fi
+
+  case "${{COMP_WORDS[1]}}" in
+{option_cases}
+    *) COMPREPLY=() ;;
+  esac
+}}
+complete -F _steamguard_pc_complete steamguard-pc
+"""
+    if shell == "zsh":
+        zsh_top_level = _shell_words([*global_options, *commands])
+        option_cases = "\n".join(
+            f"    {command}) options=({_shell_words(options)}); _describe 'option' options ;;"
+            for command, options in command_options.items()
+        )
+        return f"""#compdef steamguard-pc
+_steamguard_pc() {{
+  local -a top_level options color_modes
+  top_level=({zsh_top_level})
+  color_modes=({color_words})
+  if [[ $words[$((CURRENT - 1))] == "--color" ]]; then
+    _describe 'color mode' color_modes
+    return
+  fi
+  if (( CURRENT == 2 )); then
+    _describe 'command' top_level
+    return
+  fi
+
+  case "$words[2]" in
+{option_cases}
+    *) return 1 ;;
+  esac
+}}
+compdef _steamguard_pc steamguard-pc
+"""
+
+    powershell_top_level = _powershell_words([*global_options, *commands])
+    powershell_color_modes = _powershell_words(sorted(COLOR_MODES))
+    option_cases = "\n".join(
+        f"    '{command}' {{ $candidates = @({_powershell_words(options)}); break }}"
+        for command, options in command_options.items()
+    )
+    return f"""Register-ArgumentCompleter -Native -CommandName steamguard-pc -ScriptBlock {{
+  param($wordToComplete, $commandAst, $cursorPosition)
+  $commands = @({powershell_top_level})
+  $candidates = $commands
+  if ($commandAst.CommandElements.Count -gt 1 -and $commandAst.CommandElements[$commandAst.CommandElements.Count - 2].Value -eq '--color') {{
+    $candidates = @({powershell_color_modes})
+  }} elseif ($commandAst.CommandElements.Count -gt 2) {{
+    switch ($commandAst.CommandElements[1].Value) {{
+{option_cases}
+      default {{ $candidates = @() }}
+    }}
+  }}
+  $candidates |
+    Where-Object {{ $_ -like "$wordToComplete*" }} |
+    ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }}
+}}
+"""
+
+
+def _cmd_completion(args: argparse.Namespace) -> int:
+    parser = _build_parser()
+    print(_completion_script(args.shell, _parser_command_names(parser), _parser_global_options(parser), _parser_command_options(parser)), end="")
+    return 0
+
+
+def _cmd_help(args: argparse.Namespace) -> int:
+    parser = _build_parser()
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    command_parsers = _parser_command_parsers(parser)
+    command_parser = command_parsers.get(args.command)
+    if command_parser is None:
+        matches = difflib.get_close_matches(args.command, command_parsers, n=1, cutoff=0.55)
+        suggestion = f" Did you mean '{matches[0]}'?" if matches else ""
+        raise ValueError(f"unknown command {args.command!r}.{suggestion}")
+
+    command_parser.print_help()
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="steamguard-pc",
         description=HELP_DESCRIPTION,
         epilog=HELP_EPILOG,
         formatter_class=_HelpFormatter,
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_package_version()}")
+    parser.add_argument(
+        "--color",
+        choices=sorted(COLOR_MODES),
+        default="auto",
+        help="Control colored output: auto, always, or never.",
+    )
+    parser.add_argument("--no-color", action="store_const", dest="color", const="never", help="Disable colored output.")
     subparsers = parser.add_subparsers(
         dest="command",
         metavar="COMMAND",
@@ -1047,6 +1336,24 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Use `steamguard-pc COMMAND -h` for command-specific options.",
         required=True,
     )
+
+    completion = subparsers.add_parser(
+        "completion",
+        help="Print shell completion setup.",
+        description="Print a deterministic shell completion script for steamguard-pc commands.",
+        formatter_class=_HelpFormatter,
+    )
+    completion.add_argument("shell", choices=("bash", "zsh", "powershell"), help="Shell to generate completion for.")
+    completion.set_defaults(func=_cmd_completion)
+
+    help_command = subparsers.add_parser(
+        "help",
+        help="Show help for steamguard-pc or one command.",
+        description="Show top-level help or command-specific help without remembering -h placement.",
+        formatter_class=_HelpFormatter,
+    )
+    help_command.add_argument("command", nargs="?", metavar="COMMAND", help="Command to show help for.")
+    help_command.set_defaults(func=_cmd_help)
 
     setup = subparsers.add_parser(
         "setup",
@@ -1173,6 +1480,7 @@ def _build_parser() -> argparse.ArgumentParser:
     code.add_argument("steamid64", metavar="STEAMID64", help="Stored account to use.")
     code.add_argument("--timestamp", type=int, metavar="UNIX_TIME", help="Generate the code for this Unix timestamp.")
     code.add_argument("--steam-time", action="store_true", help="Query Steam server time before generating the code.")
+    code.add_argument("--plain", action="store_true", help="Print only the 5-character code for copying or scripts.")
     code.set_defaults(func=_cmd_code)
 
     pending = subparsers.add_parser(
@@ -1182,6 +1490,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=_HelpFormatter,
     )
     pending.add_argument("steamid64", metavar="STEAMID64", help="Stored account to query.")
+    pending.add_argument("--json", action="store_true", help="Print pending confirmations as JSON.")
     pending.set_defaults(func=_cmd_confirmations)
 
     approve = subparsers.add_parser(
@@ -1272,6 +1581,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=_HelpFormatter,
     )
     accounts.add_argument("--delete", metavar="STEAMID64", help="Delete this local account and all stored secrets; Steam is not changed.")
+    accounts.add_argument("--json", action="store_true", help="Print account metadata as JSON without secrets.")
     accounts.set_defaults(func=_cmd_accounts)
 
     find_mafiles = subparsers.add_parser(
@@ -1307,13 +1617,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+    global _COLOR_MODE
+    previous_color_mode = _COLOR_MODE
+    _COLOR_MODE = _argv_color_mode(argv)
     try:
-        return int(args.func(args))
-    except EXPECTED_ERRORS as exc:
-        print(_exception_text(exc), file=sys.stderr)
-        return 1
+        parser = _build_parser()
+        try:
+            args = parser.parse_args(argv)
+            _COLOR_MODE = args.color
+            return int(args.func(args))
+        except KeyboardInterrupt:
+            print(_color("\nInterrupted; no changes made.", COLOR_INTERRUPT, sys.stderr), file=sys.stderr)
+            return 130
+        except EXPECTED_ERRORS as exc:
+            print(_color(_exception_text(exc), COLOR_ERROR, sys.stderr), file=sys.stderr)
+            return 1
+    finally:
+        _COLOR_MODE = previous_color_mode
 
 
 if __name__ == "__main__":

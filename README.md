@@ -21,12 +21,26 @@ python -m pip install .
 steamguard-pc --help
 ```
 
+Check the installed CLI version with `steamguard-pc --version`.
+
 For development:
 
 ```powershell
 python -m pip install -e ".[dev]"
 python -m pytest
 ```
+
+## Shell completion
+
+Generate a completion script for your shell and add it to your profile:
+
+```powershell
+steamguard-pc completion powershell
+```
+
+For Bash or Zsh, use `steamguard-pc completion bash` or `steamguard-pc completion zsh`.
+Pressing Ctrl+C during an interactive prompt exits cleanly without a traceback.
+Colored output is automatic on terminals; use `--color always`, `--color never`, or `--no-color` to override detection.
 
 ## Quick start
 
@@ -66,9 +80,10 @@ steamguard-pc confirmations STEAMID64
 ```powershell
 steamguard-pc code STEAMID64
 steamguard-pc code STEAMID64 --steam-time
+steamguard-pc code STEAMID64 --plain
 ```
 
-`--steam-time` asks Steam for the current server time before generating the code. Use it if Steam rejects local-clock codes.
+`--steam-time` asks Steam for the current server time before generating the code. Use it if Steam rejects local-clock codes. `--plain` prints only the five-character code for copying or scripts.
 
 ### Approve a Steam login confirmation
 
@@ -84,11 +99,12 @@ Login confirmations are Steam sign-in approval requests for this account. SteamG
 
 ```powershell
 steamguard-pc confirmations STEAMID64
+steamguard-pc confirmations STEAMID64 --json
 steamguard-pc approve STEAMID64 CONFIRMATION_ID
 steamguard-pc cancel  STEAMID64 CONFIRMATION_ID
 ```
 
-Single confirmation actions fetch the current confirmation, show its details, try to show a trade-offer id when available, then require an exact typed phrase before submitting.
+`confirmations --json` prints pending mobile confirmations as JSON for scripts. Single confirmation actions fetch the current confirmation, show its details, try to show a trade-offer id when available, then require an exact typed phrase before submitting.
 
 Batch actions are also available:
 
@@ -154,19 +170,20 @@ The revocation code is Steam's `R#####` authenticator-removal code. `remove-auth
 
 ## Command reference
 
-Run `steamguard-pc COMMAND -h` for command-specific options.
+Run `steamguard-pc COMMAND -h` or `steamguard-pc help COMMAND` for command-specific options.
 
 | Command | Purpose |
 | --- | --- |
+| `help [COMMAND]` | Show top-level help or command-specific help. |
 | `setup [--mafile PATH] [--skip-cookies]` | Guided setup. Enroll, sign in for cookies, or import a `.maFile`. |
 | `enroll [ACCOUNT_NAME]` | Sign in, add a mobile authenticator, store its secrets, and finalize with Steam's activation code. |
 | `login [ACCOUNT_NAME]` | Sign in and store refresh/access tokens plus Steam Community session data. |
-| `accounts [--delete STEAMID64]` | List local accounts or delete one local account and all of its stored secrets. Steam is not changed. |
-| `code STEAMID64 [--timestamp UNIX_TIME] [--steam-time]` | Print a Steam Guard login code and seconds remaining. |
+| `accounts [--json] [--delete STEAMID64]` | List local account metadata as text or JSON, or delete one local account and all of its stored secrets. Steam is not changed. |
+| `code STEAMID64 [--timestamp UNIX_TIME] [--steam-time] [--plain]` | Print a Steam Guard login code and seconds remaining, or only the code with `--plain`. |
 | `login-confirmations STEAMID64` | List pending Steam login confirmations. |
 | `approve-login STEAMID64 CLIENT_ID` | Approve one Steam login confirmation. |
 | `deny-login STEAMID64 CLIENT_ID` | Deny one Steam login confirmation. |
-| `confirmations STEAMID64` | List pending mobile confirmations. |
+| `confirmations STEAMID64 [--json]` | List pending mobile confirmations as text or JSON. |
 | `approve STEAMID64 CONFIRMATION_ID` | Approve one pending confirmation after review and exact typed consent. |
 | `cancel STEAMID64 CONFIRMATION_ID` | Cancel one pending confirmation after review and exact typed consent. |
 | `approve-all STEAMID64` | Approve the current batch only if every displayed item is Trade or Market listing. |
@@ -180,6 +197,7 @@ Run `steamguard-pc COMMAND -h` for command-specific options.
 | `recovery-codes STEAMID64` | Create and print one-time Steam recovery codes after exact typed consent. |
 | `export-backup PATH [STEAMID64 ...]` | Export selected accounts, secrets, and session tokens to an encrypted backup. |
 | `import-backup PATH [--replace]` | Import accounts from an encrypted SteamGuardPC backup. |
+| `completion SHELL` | Print a shell completion script for `bash`, `zsh`, or `powershell`. |
 
 ## Storage and security model
 

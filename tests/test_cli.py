@@ -29,6 +29,14 @@ def test_code_timestamp_prints_deterministic_code(monkeypatch, capsys):
     ]
 
 
+def test_code_plain_prints_only_code(monkeypatch, capsys):
+    monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: SHARED_SECRET)
+
+    assert cli.main(["code", STEAMID64, "--timestamp", "0", "--plain"]) == 0
+
+    assert capsys.readouterr().out == "CX2MR\n"
+
+
 def test_code_steam_time_uses_query_time(monkeypatch, capsys):
     monkeypatch.setattr(cli.storage, "get_required_secret", lambda steamid64, field: SHARED_SECRET)
     monkeypatch.setattr(cli.steam_time, "query_steam_time", lambda: 30)
@@ -359,6 +367,26 @@ def _seed_cli_backup_account():
     cli.storage.put_secret(STEAMID64, "identity_secret", IDENTITY_SECRET)
     cli.storage.put_secret(STEAMID64, "revocation_code", REVOCATION_CODE)
     return metadata
+
+
+def test_accounts_json_prints_metadata_without_secrets(keyring_store, capsys):
+    metadata = _seed_cli_backup_account()
+
+    assert cli.main(["accounts", "--json"]) == 0
+
+    output = capsys.readouterr().out
+    parsed = json.loads(output)
+    assert parsed == [
+        {
+            "steamid64": metadata.steamid64,
+            "account_name": metadata.account_name,
+            "device_id": metadata.device_id,
+            "last_imported_at": metadata.last_imported_at,
+        }
+    ]
+    assert SHARED_SECRET not in output
+    assert IDENTITY_SECRET not in output
+    assert REVOCATION_CODE not in output
 
 
 def test_accounts_delete_requires_exact_phrase_without_removing(monkeypatch, keyring_store, capsys):
@@ -815,6 +843,26 @@ def _patch_confirmation_context(monkeypatch, calls):
         return target
 
     monkeypatch.setattr(cli.confirmations, "respond_to_confirmation_id", respond_to_confirmation_id)
+
+
+def test_confirmations_json_lists_current_confirmations(monkeypatch, capsys):
+    calls = []
+    _patch_confirmation_context(monkeypatch, calls)
+
+    assert cli.main(["confirmations", STEAMID64, "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == [
+        {
+            "id": "abc",
+            "creator_id": "creator",
+            "type": None,
+            "type_name": "Trade",
+            "headline": "Trade offer",
+            "summary": "Summary",
+            "creation_time": None,
+        }
+    ]
+    assert calls == []
 
 
 def _seed_login_confirmation_account() -> None:
@@ -1293,3 +1341,94 @@ def test_cancel_requires_exact_cancel_phrase(monkeypatch, capsys):
     assert calls[0][1]["accept"] is False
     assert f"account: fixture ({STEAMID64})" in output
     assert f"Cancelled abc.\n" in output
+
+
+
+def test_invalid_command_suggests_nearest_command(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["cod"])
+
+    assert excinfo.value.code == 2
+    assert "Did you mean 'code'?" in capsys.readouterr().err
+
+
+def test_completion_command_prints_bash_completion_script(capsys):
+    assert cli.main(["completion", "bash"]) == 0
+
+    output = capsys.readouterr().out
+    assert "complete -F _steamguard_pc_complete steamguard-pc" in output
+    assert "approve-all" in output
+    assert "code" in output
+    assert "--steam-time" in output
+    assert "--include-revocation-code" in output
+    assert "--version" in output
+    assert "--color" in output
+    assert "always auto never" in output
+
+
+def test_main_handles_keyboard_interrupt(monkeypatch, capsys):
+    def interrupt_input(prompt=""):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", interrupt_input)
+
+    assert cli.main(["setup"]) == 130
+
+    captured = capsys.readouterr()
+    assert "Interrupted; no changes made." in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_help_honors_force_color(monkeypatch, capsys):
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["-h"])
+
+    assert excinfo.value.code == 0
+    assert "\033[" in capsys.readouterr().out
+
+
+def test_color_option_can_disable_forced_color(monkeypatch, capsys):
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--color", "never", "-h"])
+
+    assert excinfo.value.code == 0
+    assert "\033[" not in capsys.readouterr().out
+
+
+def test_color_option_can_override_no_color(monkeypatch, capsys):
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--color=always", "-h"])
+
+    assert excinfo.value.code == 0
+    assert "\033[" in capsys.readouterr().out
+
+
+def test_version_flag_prints_package_version(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--version"])
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out.strip()
+    assert output.startswith("steamguard-pc ")
+    assert output.endswith("0.1.0")
+
+
+def test_help_command_prints_command_help(capsys):
+    assert cli.main(["help", "code"]) == 0
+
+    output = capsys.readouterr().out
+    assert "usage: steamguard-pc code" in output
+    assert "--steam-time" in output
+
+
+def test_help_command_suggests_unknown_command(capsys):
+    assert cli.main(["help", "cod"]) == 1
+
+    assert "Did you mean 'code'?" in capsys.readouterr().err
