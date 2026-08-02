@@ -15,7 +15,7 @@ Not affiliated with Valve or Steam.
 ## Install
 
 ```powershell
-uv tool install git+https://github.com/x15rte/steamguard-pc.git
+uv tool install git+https://github.com/x15rte/steamguard-pc.git -p 3.14
 steamguard-pc --help
 ```
 
