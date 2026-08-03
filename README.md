@@ -189,6 +189,11 @@ python -m pytest
 
 The pytest suite includes the configured pyright check. CI runs on `windows-latest` with Python 3.11.
 
+TODO:  
+Ensure that all features are working  
+Supports multiple platforms  
+GUI
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
